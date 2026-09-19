@@ -9,11 +9,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -23,111 +21,107 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Highly dense, ultra-premium immersive interactive Gemini Live Orb.
- * Directly modeled after professional 3D energy particle spheres and live neural fields:
- * - Extremely dense rotating 3D spherical stardust particle field (100 distinct spatial vertices)
- * - Multi-layer harmonic fluid plasma loops whose height, frequency, and turbulence are fully voice-amplitude modulated
- * - Multi-stage concentric acoustic ripple expansion
- * - 100% vector-rendered inside Compose Canvas
+ * Model class representing properties of individual stardust particles.
+ */
+private data class ParticleData(
+    val x: Float,
+    val y: Float,
+    val z: Float,
+    val speedFactor: Float,
+    val baseSize: Float,
+    val colorGroup: Int,
+    val planeOffset: Float,
+    val phaseOffset: Float
+)
+
+/**
+ * High-Fidelity Neural Stardust Particle Orb.
+ * Recreates the ultra-dense, organic particle simulation from Screenshot 10:
+ * - 600 individual 3D simulated stardust coordinates arranged in an organic spherical field.
+ * - Live differential Y-axis rotation (Saturn-like differential velocities for organic turbulence).
+ * - Full 3D depth sorting (occlusion) rendering front-most particles larger and brighter, back-most fainter.
+ * - Dynamic acoustic particle vibrations and outwards expulsion mapped directly to real-time voice amplitude.
+ * - Hyper-realistic, tiny high-density particle visuals with soft glowing ambient core.
  */
 @Composable
 fun GeminiLiveOrb(
     modifier: Modifier = Modifier,
-    size: Dp = 190.dp,
+    size: Dp = 210.dp,
     isActive: Boolean = true,
     isSpeaking: Boolean = false,
     amplitude: Float = 0f, // real-time voice amplitude (0f to 1f)
     onClick: (() -> Unit)? = null
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "gemini_orb_dense")
+    val infiniteTransition = rememberInfiniteTransition(label = "gemini_orb_stardust")
 
-    // Breathing scale, amplified by active speaking and amplitude levels
+    // Breathing pulse scale matching voice activity
     val breathingScale by infiniteTransition.animateFloat(
-        initialValue = if (isSpeaking) 0.92f else 0.95f,
-        targetValue = if (isSpeaking) 1.06f else 1.02f,
+        initialValue = if (isSpeaking) 0.94f else 0.97f,
+        targetValue = if (isSpeaking) 1.05f else 1.01f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 800 else 2000, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = if (isSpeaking) 750 else 1800, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "orb_breath_dense"
+        label = "orb_breath_stardust"
     )
 
-    // Primary rotation velocity
-    val rotationPrimary by infiniteTransition.animateFloat(
+    // Orbital angle of rotation
+    val orbitalAngle by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 4000 else 10000, easing = LinearEasing),
+            animation = tween(durationMillis = if (isSpeaking) 5000 else 12000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "orb_rot_primary"
+        label = "orb_rot_orbital"
     )
 
-    // Secondary reverse counter rotation
-    val rotationSecondary by infiniteTransition.animateFloat(
-        initialValue = 360f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 3000 else 8000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orb_rot_secondary"
-    )
-
-    // Fluid wave dynamics phase
-    val wavePhase by infiniteTransition.animateFloat(
+    // Secondary wave/turbulent phase factor
+    val turbulencePhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * Math.PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 1200 else 2800, easing = LinearEasing),
+            animation = tween(durationMillis = if (isSpeaking) 1000 else 2500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "orb_phase_dense"
+        label = "orb_turbulence"
     )
 
-    // Continuous acoustic ripple progress
-    val ringPulseProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 1000 else 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orb_ring_dense"
-    )
-
-    // Core energy pulse opacity
-    val coreAlpha by infiniteTransition.animateFloat(
-        initialValue = if (isSpeaking) 0.78f else 0.55f,
-        targetValue = if (isSpeaking) 1.0f else 0.75f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 500 else 1500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "orb_core_dense"
-    )
-
-    // Ultra-dense golden ratio particle stardust coordinates (100 premium coordinates)
-    val totalParticles = 100
+    // Golden ratio spherical particle generation (600 premium stardust coordinates)
+    val totalParticles = 600
     val particles = remember {
         (0 until totalParticles).map { i ->
-            val theta = (i * 137.5) * (Math.PI / 180.0) // Golden spiral distribution
-            val y = 1.0 - (i / (totalParticles - 1).toDouble()) * 2.0 // Sphere height projection
-            val radiusAtY = kotlin.math.sqrt((1.0 - y * y).coerceAtLeast(0.0))
-            val x = kotlin.math.cos(theta) * radiusAtY
-            val z = kotlin.math.sin(theta) * radiusAtY
-            Triple(x.toFloat(), y.toFloat(), z.toFloat())
+            val theta = (i * 137.5) * (Math.PI / 180.0) // Golden angle distribution
+            val y = 1.0 - (i / (totalParticles - 1).toDouble()) * 2.0 // Y-axis projection
+            val radiusAtY = sqrt((1.0 - y * y).coerceAtLeast(0.0))
+            val x = cos(theta) * radiusAtY
+            val z = sin(theta) * radiusAtY
+
+            // Speed, size and inclination variation for organic flow
+            val speedFactor = 0.5f + (i % 6) * 0.15f
+            val baseSize = 0.35f + (i % 5) * 0.22f // small stardust radius scale (dp)
+            val colorGroup = i % 4 // 0 = bright white, 1 = cyan/ice blue, 2 = cool grey, 3 = pale sky blue
+            val orbitalPlaneOffset = (i % 12 - 6) * 0.04f // slight vertical wiggle incline
+            val phaseOffset = (i * 0.035f).toFloat()
+
+            ParticleData(
+                x = x.toFloat(),
+                y = y.toFloat(),
+                z = z.toFloat(),
+                speedFactor = speedFactor,
+                baseSize = baseSize,
+                colorGroup = colorGroup,
+                planeOffset = orbitalPlaneOffset,
+                phaseOffset = phaseOffset
+            )
         }
     }
 
@@ -147,191 +141,113 @@ fun GeminiLiveOrb(
     ) {
         Canvas(modifier = Modifier.size(size)) {
             val center = Offset(this.size.width / 2f, this.size.height / 2f)
-            // Real-time voice amplitude expands base radius naturally
-            val realAmplitudeMod = (1f + amplitude * 0.18f)
-            val baseRadius = (this.size.minDimension / 2f) * 0.74f * breathingScale * realAmplitudeMod
+            // Real-time vocal expansion
+            val expansion = (1f + amplitude * 0.22f)
+            val baseRadius = (this.size.minDimension / 2f) * 0.78f * breathingScale * expansion
 
-            // 1. Extreme Outermost Ethereal Aurora
+            // 1. Ultra-soft background radial glow to blend particles
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0x6638BDF8),
-                        Color(0x382563EB),
-                        Color(0x121D4ED8),
+                        Color(0x2B38BDF8),
+                        Color(0x131D4ED8),
                         Color.Transparent
                     ),
                     center = center,
-                    radius = baseRadius * 1.45f
+                    radius = baseRadius * 1.35f
                 ),
-                radius = baseRadius * 1.45f,
+                radius = baseRadius * 1.35f,
                 center = center
             )
 
-            // 2. Double Expanding Shockwave Rings (Acoustic resonance)
+            // 2. Real-time Acoustic Wave Outer Ripple (Screenshot 10 - extremely thin and faint)
             if (isActive) {
-                // Outer ring
-                val ring1Radius = baseRadius * (0.85f + ringPulseProgress * 0.55f)
-                val ring1Alpha = (1f - ringPulseProgress) * (if (isSpeaking) 0.7f else 0.35f)
+                val rippleRadius1 = baseRadius * (0.85f + (turbulencePhase / (2 * Math.PI).toFloat()) * 0.4f)
+                val rippleAlpha1 = (1f - (turbulencePhase / (2 * Math.PI).toFloat())) * 0.15f
                 drawCircle(
-                    color = Color(0xFF60A5FA).copy(alpha = ring1Alpha),
-                    radius = ring1Radius,
+                    color = Color(0xFF60A5FA).copy(alpha = rippleAlpha1),
+                    radius = rippleRadius1,
                     center = center,
-                    style = Stroke(width = 2.dp.toPx() * (1f - ringPulseProgress * 0.5f))
-                )
-
-                // Inner ring (interleaved for density)
-                val ring2Progress = (ringPulseProgress + 0.5f) % 1f
-                val ring2Radius = baseRadius * (0.85f + ring2Progress * 0.55f)
-                val ring2Alpha = (1f - ring2Progress) * (if (isSpeaking) 0.5f else 0.25f)
-                drawCircle(
-                    color = Color(0xFF93C5FD).copy(alpha = ring2Alpha),
-                    radius = ring2Radius,
-                    center = center,
-                    style = Stroke(width = 1.5.dp.toPx() * (1f - ring2Progress * 0.5f))
+                    style = Stroke(width = 0.8.dp.toPx())
                 )
             }
 
-            // 3. Ultra-Dense 3D Particle Stardust Field
-            val rotRad = Math.toRadians(rotationPrimary.toDouble())
-            val cosRot = kotlin.math.cos(rotRad).toFloat()
-            val sinRot = kotlin.math.sin(rotRad).toFloat()
+            // 3. Process, Project, and Depth-Sort Particles in 3D Space
+            val angleRad = Math.toRadians(orbitalAngle.toDouble())
 
-            particles.forEach { (px, py, pz) ->
-                // Rotate around Y-axis for true depth feel
-                val rx = px * cosRot - pz * sinRot
-                val rz = px * sinRot + pz * cosRot
-                val ry = py
+            val projectedParticles = particles.map { p ->
+                // Apply individual differential rotation (different speeds create shear and galaxy-like spiral flow)
+                val individualAngle = angleRad * p.speedFactor + p.phaseOffset
+                val cosA = cos(individualAngle).toFloat()
+                val sinA = sin(individualAngle).toFloat()
 
-                // Parallax depth projection math
-                val depthFactor = (rz + 1.2f) / 2.4f // Normalize depth range
-                val screenX = center.x + rx * baseRadius * 0.90f
-                val screenY = center.y + ry * baseRadius * 0.90f
+                // Rotate around Y-axis
+                val rx = p.x * cosA - p.z * sinA
+                val rz = p.x * sinA + p.z * cosA
+                // Add minor orbital plane wobble
+                val ry = p.y + p.planeOffset * sin(turbulencePhase + p.phaseOffset)
+
+                // Perspective projection mapping
+                val depth = (rz + 1.2f) / 2.4f // Normalize depth range (0 = far, 1 = near)
                 
-                // Real amplitude makes particle stars vibrate and expand outward dynamically
-                val vibration = if (amplitude > 0.05f) (sin(wavePhase * 5f + px) * amplitude * 4f) else 0f
-                val finalX = screenX + cos(px * 10f) * vibration
-                val finalY = screenY + sin(py * 10f) * vibration
+                // Scale distance based on depth and voice amplitude vibration
+                val audioVibration = if (amplitude > 0.02f) {
+                    val noise = sin(turbulencePhase * 6f + p.phaseOffset) * amplitude * 18f
+                    noise
+                } else 0f
 
-                val particleRadius = (1.5.dp.toPx() + depthFactor * 2.5.dp.toPx())
-                val particleAlpha = (0.28f + depthFactor * 0.72f) * (if (isSpeaking) 1.0f else 0.75f)
+                val distanceMultiplier = 0.88f + audioVibration / baseRadius
+                val screenX = center.x + rx * baseRadius * distanceMultiplier
+                val screenY = center.y + ry * baseRadius * distanceMultiplier
 
+                // Dynamic particle radius and transparency depending on depth (3D Occlusion)
+                val particleRadius = (p.baseSize.dp.toPx() * (0.4f + depth * 1.2f))
+                val baseAlpha = when (p.colorGroup) {
+                    0 -> 0.85f  // Bright white
+                    1 -> 0.70f  // Cyan
+                    2 -> 0.40f  // Cool grey
+                    else -> 0.65f // Sky blue
+                }
+                val finalAlpha = baseAlpha * (0.25f + depth * 0.75f) * (if (isSpeaking) 1.0f else 0.78f)
+
+                val color = when (p.colorGroup) {
+                    0 -> Color(0xFFFFFFFF).copy(alpha = finalAlpha)
+                    1 -> Color(0xFFE0F2FE).copy(alpha = finalAlpha) // Ice blue
+                    2 -> Color(0xFF94A3B8).copy(alpha = finalAlpha) // Slate/stardust grey
+                    else -> Color(0xFF38BDF8).copy(alpha = finalAlpha) // Cyan sky
+                }
+
+                Triple(Offset(screenX, screenY), particleRadius, color) to rz
+            }
+
+            // Sort particles by Z-depth (from back to front) to prevent rendering overlapping errors
+            val sortedParticles = projectedParticles.sortedBy { it.second }
+
+            // Draw the sorted stardust particles
+            sortedParticles.forEach { (particleProps, _) ->
+                val (offset, radius, color) = particleProps
                 drawCircle(
-                    color = if (depthFactor > 0.65f) Color(0xFFF0F9FF).copy(alpha = particleAlpha)
-                    else Color(0xFF38BDF8).copy(alpha = particleAlpha),
-                    radius = particleRadius,
-                    center = Offset(finalX, finalY)
+                    color = color,
+                    radius = radius,
+                    center = offset
                 )
             }
 
-            // 4. Layered Fluid Plasma Waveforms (Modulated by vocal amplitude)
-            rotate(degrees = rotationPrimary, pivot = center) {
-                drawPlasmaWave(
-                    center = center,
-                    radius = baseRadius * 0.92f,
-                    wavePhase = wavePhase,
-                    wavesCount = 7,
-                    amplitude = (if (isSpeaking) 12f else 6f) + amplitude * 18f,
-                    strokeColor = Color(0xBB38BDF8),
-                    strokeWidth = 2.8.dp.toPx()
-                )
-            }
-
-            rotate(degrees = rotationSecondary, pivot = center) {
-                drawPlasmaWave(
-                    center = center,
-                    radius = baseRadius * 0.84f,
-                    wavePhase = -wavePhase * 1.4f,
-                    wavesCount = 5,
-                    amplitude = (if (isSpeaking) 14f else 7f) + amplitude * 22f,
-                    strokeColor = Color(0xEE60A5FA),
-                    strokeWidth = 2.2.dp.toPx()
-                )
-            }
-
-            // Extra third ultra-thin responsive ring for high density
-            rotate(degrees = rotationPrimary * 1.5f, pivot = center) {
-                drawPlasmaWave(
-                    center = center,
-                    radius = baseRadius * 0.76f,
-                    wavePhase = wavePhase * 1.8f,
-                    wavesCount = 9,
-                    amplitude = (if (isSpeaking) 8f else 4f) + amplitude * 12f,
-                    strokeColor = Color(0xAAFFFFFF),
-                    strokeWidth = 1.5.dp.toPx()
-                )
-            }
-
-            // 5. Deep Vibrant Spherical Inner Glow
-            val finalCoreAlpha = (coreAlpha + amplitude * 0.2f).coerceIn(0f, 1f)
+            // 4. Subtle glowing stellar core inside the stardust field
+            val coreAlpha = (0.35f + amplitude * 0.25f).coerceIn(0.1f, 0.7f)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFF93C5FD).copy(alpha = finalCoreAlpha * 0.90f),
-                        Color(0xFF38BDF8).copy(alpha = finalCoreAlpha * 0.70f),
-                        Color(0xFF2563EB).copy(alpha = finalCoreAlpha * 0.45f),
-                        Color(0xFF1D4ED8).copy(alpha = 0.20f),
-                        Color.Transparent
+                        Color(0xFFE0F2FE).copy(alpha = coreAlpha * 0.8f),
+                        Color(0xFF0284C7).copy(alpha = coreAlpha * 0.4f),
+                        Color(0x000284C7)
                     ),
                     center = center,
-                    radius = baseRadius * 0.76f
+                    radius = baseRadius * 0.45f
                 ),
-                radius = baseRadius * 0.76f,
-                center = center
-            )
-
-            // 6. Intense White-Hot Luminescent Core
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFFFFFFFF).copy(alpha = finalCoreAlpha),
-                        Color(0xFFBAE6FD).copy(alpha = finalCoreAlpha * 0.85f),
-                        Color(0xFF38BDF8).copy(alpha = finalCoreAlpha * 0.35f),
-                        Color.Transparent
-                    ),
-                    center = center,
-                    radius = baseRadius * 0.40f
-                ),
-                radius = baseRadius * 0.40f,
+                radius = baseRadius * 0.45f,
                 center = center
             )
         }
     }
-}
-
-/**
- * Draws an organic harmonic sinusoidal fluid closed loop with customized aesthetics.
- */
-private fun DrawScope.drawPlasmaWave(
-    center: Offset,
-    radius: Float,
-    wavePhase: Float,
-    wavesCount: Int,
-    amplitude: Float,
-    strokeColor: Color,
-    strokeWidth: Float
-) {
-    val path = Path()
-    val steps = 96 // Increased steps for supreme precision line tracing
-    val stepAngle = (2 * Math.PI / steps).toFloat()
-
-    for (i in 0..steps) {
-        val angle = i * stepAngle
-        val waveMod = sin(angle * wavesCount + wavePhase) * amplitude
-        val r = radius + waveMod
-        val x = center.x + r * cos(angle)
-        val y = center.y + r * sin(angle)
-
-        if (i == 0) {
-            path.moveTo(x, y)
-        } else {
-            path.lineTo(x, y)
-        }
-    }
-    path.close()
-
-    drawPath(
-        path = path,
-        color = strokeColor,
-        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-    )
 }
