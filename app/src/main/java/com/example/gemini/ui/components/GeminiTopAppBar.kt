@@ -1,6 +1,7 @@
 package com.example.gemini.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.AlertDialog
@@ -62,6 +64,7 @@ fun GeminiTopAppBar(
     onModelSelected: (GeminiModel) -> Unit,
     onMenuClick: () -> Unit,
     onNewChatClick: () -> Unit,
+    onStarkModeClick: () -> Unit = {},
     userEmail: String = "roshanyadavofficial4@gmail.com",
     modifier: Modifier = Modifier
 ) {
@@ -208,11 +211,30 @@ fun GeminiTopAppBar(
                 }
             }
 
-            // Right side: New Chat pen icon + Profile Avatar
+            // Right side: Stark Mode AR icon + New Chat pen icon + Profile Avatar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Stark Mode AR Dashboards button
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE0F7FA))
+                        .border(1.dp, Color(0xFF00E5FF), CircleShape)
+                        .clickable { onStarkModeClick() }
+                        .testTag("stark_mode_top_bar_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Radar,
+                        contentDescription = "Stark AR Dashboards",
+                        tint = Color(0xFF00838F),
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
                 // Pen / Edit sparkle icon
                 IconButton(
                     onClick = onNewChatClick,

@@ -74,6 +74,7 @@ fun GeminiScreen(
 
     var isLiveMinimized by remember { mutableStateOf(false) }
     var isLiveBannerMuted by remember { mutableStateOf(false) }
+    var showStarkPreview by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
 
@@ -148,6 +149,9 @@ fun GeminiScreen(
                         },
                         onNewChatClick = {
                             viewModel.startNewChat()
+                        },
+                        onStarkModeClick = {
+                            showStarkPreview = true
                         },
                         userEmail = "roshanyadavofficial4@gmail.com",
                         modifier = Modifier.padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
@@ -257,11 +261,6 @@ fun GeminiScreen(
                 viewModel.closeLiveMode()
                 isLiveMinimized = false
             },
-            onSpeakToChat = { spokenText ->
-                viewModel.sendMessage(spokenText)
-                viewModel.closeLiveMode()
-                isLiveMinimized = false
-            },
             onMinimizeToBubble = {
                 isLiveMinimized = true
             }
@@ -275,5 +274,20 @@ fun GeminiScreen(
             onSaveApiKey = { viewModel.setCustomApiKey(it) },
             onDismiss = { viewModel.closeSettings() }
         )
+    }
+
+    // Stark AR Mode Screen (Phase 2 - Step 1: Camera + Translucent Floating Dashboards)
+    if (showStarkPreview) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showStarkPreview = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true
+            )
+        ) {
+            com.example.gemini.ui.stark.StarkArScreen(
+                onDismiss = { showStarkPreview = false }
+            )
+        }
     }
 }

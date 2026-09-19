@@ -110,7 +110,6 @@ data class LiveTranscriptItem(
 fun GeminiLiveDialog(
     currentModel: com.example.gemini.data.model.GeminiModel,
     onDismiss: () -> Unit,
-    onSpeakToChat: (String) -> Unit,
     onMinimizeToBubble: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -1137,9 +1136,6 @@ fun GeminiLiveDialog(
                         // 5. Close / End Button - Authentic Circular Button
                         Surface(
                             onClick = {
-                                if (liveSpokenText.isNotBlank()) {
-                                    onSpeakToChat(liveSpokenText)
-                                }
                                 onDismiss()
                             },
                             modifier = Modifier.size(52.dp),
