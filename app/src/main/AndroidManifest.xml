@@ -9,11 +9,8 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
-
-    <uses-feature
-        android:name="android.hardware.camera.ar"
-        android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -24,7 +21,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
-        <!-- ARCore Optional/Enabled declaration -->
+
+        <!-- Declares ARCore as optional so the app can be installed on non-AR devices -->
         <meta-data
             android:name="com.google.ar.core"
             android:value="optional" />

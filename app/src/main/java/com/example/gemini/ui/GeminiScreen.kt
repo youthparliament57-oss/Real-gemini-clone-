@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ar.ui.ArWorkspaceScreen
 import com.example.gemini.ui.components.ChatbotRoleSelectorRow
 import com.example.gemini.ui.components.GeminiInputBar
 import com.example.gemini.ui.components.GeminiLiveDialog
@@ -74,7 +75,7 @@ fun GeminiScreen(
 
     var isLiveMinimized by remember { mutableStateOf(false) }
     var isLiveBannerMuted by remember { mutableStateOf(false) }
-    var showStarkPreview by remember { mutableStateOf(false) }
+    var isArOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
 
@@ -150,8 +151,9 @@ fun GeminiScreen(
                         onNewChatClick = {
                             viewModel.startNewChat()
                         },
-                        onStarkModeClick = {
-                            showStarkPreview = true
+                        onOpenArClick = {
+                            viewModel.closeLiveMode()
+                            isArOpen = true
                         },
                         userEmail = "roshanyadavofficial4@gmail.com",
                         modifier = Modifier.padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
@@ -276,18 +278,10 @@ fun GeminiScreen(
         )
     }
 
-    // Stark AR Mode Screen (Phase 2 - Step 1: Camera + Translucent Floating Dashboards)
-    if (showStarkPreview) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { showStarkPreview = false },
-            properties = androidx.compose.ui.window.DialogProperties(
-                usePlatformDefaultWidth = false,
-                dismissOnBackPress = true
-            )
-        ) {
-            com.example.gemini.ui.stark.StarkArScreen(
-                onDismiss = { showStarkPreview = false }
-            )
-        }
+    // AR Foundation Workspace Screen
+    if (isArOpen) {
+        ArWorkspaceScreen(
+            onDismiss = { isArOpen = false }
+        )
     }
 }

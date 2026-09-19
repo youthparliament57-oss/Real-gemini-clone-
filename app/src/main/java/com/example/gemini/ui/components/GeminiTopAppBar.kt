@@ -22,8 +22,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -64,7 +64,7 @@ fun GeminiTopAppBar(
     onModelSelected: (GeminiModel) -> Unit,
     onMenuClick: () -> Unit,
     onNewChatClick: () -> Unit,
-    onStarkModeClick: () -> Unit = {},
+    onOpenArClick: (() -> Unit)? = null,
     userEmail: String = "roshanyadavofficial4@gmail.com",
     modifier: Modifier = Modifier
 ) {
@@ -211,28 +211,26 @@ fun GeminiTopAppBar(
                 }
             }
 
-            // Right side: Stark Mode AR icon + New Chat pen icon + Profile Avatar
+            // Right side: New Chat pen icon + Profile Avatar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Stark Mode AR Dashboards button
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE0F7FA))
-                        .border(1.dp, Color(0xFF00E5FF), CircleShape)
-                        .clickable { onStarkModeClick() }
-                        .testTag("stark_mode_top_bar_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Radar,
-                        contentDescription = "Stark AR Dashboards",
-                        tint = Color(0xFF00838F),
-                        modifier = Modifier.size(19.dp)
-                    )
+                // AR Workspace Mode Button
+                if (onOpenArClick != null) {
+                    IconButton(
+                        onClick = onOpenArClick,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("open_ar_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ViewInAr,
+                            contentDescription = "Open AR Workspace",
+                            tint = Color(0xFF1A73E8),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
                 // Pen / Edit sparkle icon

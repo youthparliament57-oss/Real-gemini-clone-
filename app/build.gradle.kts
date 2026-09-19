@@ -1,4 +1,6 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.io.FileInputStream
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -20,7 +22,13 @@ android {
     versionCode = 1
     versionName = "1.0"
 
-    val geminiKey = System.getenv("GEMINI_API_KEY") ?: ""
+    val envFile = rootProject.file(".env")
+    val envProps = Properties().apply {
+      if (envFile.exists()) {
+        FileInputStream(envFile).use { load(it) }
+      }
+    }
+    val geminiKey = System.getenv("GEMINI_API_KEY") ?: envProps.getProperty("GEMINI_API_KEY", "")
     buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -91,6 +99,7 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  implementation(libs.arcore)
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
@@ -134,7 +143,6 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
-  implementation(libs.arcore)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
