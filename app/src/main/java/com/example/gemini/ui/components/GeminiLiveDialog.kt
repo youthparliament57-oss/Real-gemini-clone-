@@ -282,17 +282,14 @@ fun GeminiLiveDialog(
         }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+    androidx.activity.compose.BackHandler {
+        onDismiss()
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.White
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color.White
-        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -623,7 +620,6 @@ fun GeminiLiveDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .navigationBarsPadding()
                             .padding(horizontal = 4.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -757,7 +753,6 @@ fun GeminiLiveDialog(
                 }
             }
         }
-    }
 
     // Voice Selection Sheet
     if (showVoiceSelector) {
