@@ -122,6 +122,114 @@ fun GeminiLiveDialog(
     var showScreenShareSheet by remember { mutableStateOf(false) }
     var currentVoice by remember { mutableStateOf(AvailableGeminiVoices.first()) }
     var speechAmplitude by remember { mutableStateOf(0f) }
+    var isThinking by remember { mutableStateOf(false) }
+    val geminiService = remember { com.example.gemini.data.remote.GeminiService() }
+    var transcriptHistory by remember { mutableStateOf(listOf<LiveTranscriptItem>()) }
+    val listState = rememberLazyListState()
+
+    // Speech & Audio Engine references
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+
+    fun speakWithGeminiVoice(text: String, voice: GeminiVoice) {
+        ttsEngine?.setPitch(voice.pitch)
+        ttsEngine?.setSpeechRate(voice.speechRate)
+        ttsEngine?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "gemini_live_tts")
+        isSpeaking = true
+    }
+
+    fun startListening() {
+        if (isMuted || isSpeaking || isThinking) return
+        try {
+            // Clean up any existing recognizer first to prevent locking up the microphone!
+            speechRecognizer?.let {
+                it.stopListening()
+                it.destroy()
+            }
+            speechRecognizer = null
+
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                }
+
+                recognizer.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        isListening = true
+                        isThinking = false
+                    }
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {
+                        val target = ((rmsdB + 2.0f) / 13.0f).coerceIn(0.0f, 1.0f)
+                        speechAmplitude = speechAmplitude * 0.65f + target * 0.35f
+                    }
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {
+                        isListening = false
+                    }
+                    override fun onError(error: Int) {
+                        isListening = false
+                    }
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull()
+                        if (!text.isNullOrBlank()) {
+                            liveSpokenText = text
+                            transcriptHistory = transcriptHistory + LiveTranscriptItem(isUser = true, text = text)
+                            
+                            // Transition cleanly to Thinking State
+                            isThinking = true
+                            isListening = false
+                            
+                            // Launch a background coroutine to request Gemini content using full thread-safety
+                            coroutineScope.launch {
+                                val mappedContext = transcriptHistory.map {
+                                    com.example.gemini.data.model.ChatMessage(
+                                        sessionId = "live",
+                                        isUser = it.isUser,
+                                        content = it.text
+                                    )
+                                }
+                                val result = geminiService.generateContent(
+                                    messages = mappedContext,
+                                    newPrompt = text
+                                )
+                                
+                                isThinking = false
+                                val response = result.getOrElse { "Sorry, I had trouble processing that. Can you repeat it?" }
+                                transcriptHistory = transcriptHistory + LiveTranscriptItem(isUser = false, text = response)
+                                speakWithGeminiVoice(response, currentVoice)
+                            }
+                        }
+                    }
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        matches?.firstOrNull()?.let { liveSpokenText = it }
+                    }
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+
+                recognizer.startListening(intent)
+                speechRecognizer = recognizer
+            }
+        } catch (e: Exception) {
+            isThinking = false
+            isListening = false
+        }
+    }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startListening()
+        } else {
+            Toast.makeText(context, "Microphone permission is required for Gemini Live to listen to your voice.", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(isSpeaking) {
         if (isSpeaking) {
@@ -142,38 +250,43 @@ fun GeminiLiveDialog(
         }
     }
 
-    var transcriptHistory by remember {
-        mutableStateOf(
-            listOf<LiveTranscriptItem>()
-        )
-    }
-
-    val listState = rememberLazyListState()
-
-    // Text To Speech instance
-    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
         var tts: TextToSpeech? = null
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.getDefault()
-                // Auto-choose premium network neural voice if available
+                // Auto-choose premium network voice if available
                 tts?.voices?.find { v -> v.name.lowercase().contains("en-us") && v.name.lowercase().contains("network") }?.let {
                     tts?.voice = it
                 }
                 
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
-                        isSpeaking = true
-                        isListening = false
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            isSpeaking = true
+                            isListening = false
+                            isThinking = false
+                        }
                     }
                     override fun onDone(utteranceId: String?) {
-                        isSpeaking = false
-                        isListening = true
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            isSpeaking = false
+                            isListening = true
+                            isThinking = false
+                            if (!isMuted) {
+                                startListening()
+                            }
+                        }
                     }
                     override fun onError(utteranceId: String?) {
-                        isSpeaking = false
-                        isListening = true
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            isSpeaking = false
+                            isListening = true
+                            isThinking = false
+                            if (!isMuted) {
+                                startListening()
+                            }
+                        }
                     }
                 })
             }
@@ -183,13 +296,6 @@ fun GeminiLiveDialog(
             tts?.stop()
             tts?.shutdown()
         }
-    }
-
-    fun speakWithGeminiVoice(text: String, voice: GeminiVoice) {
-        ttsEngine?.setPitch(voice.pitch)
-        ttsEngine?.setSpeechRate(voice.speechRate)
-        ttsEngine?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "gemini_live_tts")
-        isSpeaking = true
     }
 
     // Permission launcher for Camera
@@ -203,74 +309,20 @@ fun GeminiLiveDialog(
         }
     }
 
-    // Speech Recognizer setup
-    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
-
-    fun startListening() {
-        if (isMuted) return
-        try {
-            if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                }
-
-                recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        isListening = true
-                    }
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {
-                        val target = ((rmsdB + 2.0f) / 13.0f).coerceIn(0.0f, 1.0f)
-                        speechAmplitude = speechAmplitude * 0.65f + target * 0.35f
-                    }
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {
-                        isListening = false
-                    }
-                    override fun onError(error: Int) {
-                        isListening = false
-                    }
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull()
-                        if (!text.isNullOrBlank()) {
-                            liveSpokenText = text
-                            transcriptHistory = transcriptHistory + LiveTranscriptItem(isUser = true, text = text)
-                            // Simulate intelligent Live conversational feedback
-                            val response = when {
-                                text.contains("hello", ignoreCase = true) || text.contains("hi", ignoreCase = true) || text.contains("नमस्ते", ignoreCase = true) ->
-                                    "I'm doing great, thank you for asking! What can I help you with today?"
-                                text.contains("idea", ignoreCase = true) || text.contains("आइडिया", ignoreCase = true) ->
-                                    "Certainly! We could brainstorm creative concepts, plan a startup strategy, or draft new stories. Where would you like to begin?"
-                                else ->
-                                    "I understand! Let's explore this together. I can assist you in analyzing or generating solutions right now."
-                            }
-                            transcriptHistory = transcriptHistory + LiveTranscriptItem(isUser = false, text = response)
-                            speakWithGeminiVoice(response, currentVoice)
-                        }
-                    }
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        matches?.firstOrNull()?.let { liveSpokenText = it }
-                    }
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-
-                recognizer.startListening(intent)
-                speechRecognizer = recognizer
-            }
-        } catch (e: Exception) {
-            // Graceful fallback
-        }
-    }
-
     DisposableEffect(Unit) {
-        startListening()
+        val hasMic = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (hasMic) {
+            startListening()
+        } else {
+            recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
         onDispose {
+            speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
+            speechRecognizer = null
             ttsEngine?.stop()
         }
     }
@@ -445,7 +497,7 @@ fun GeminiLiveDialog(
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (transcriptHistory.isEmpty()) {
+                        if (transcriptHistory.isEmpty() && !isThinking) {
                             // Default Starting View: 4-pointed Gemini star + prompt
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -608,6 +660,40 @@ fun GeminiLiveDialog(
                                                         modifier = Modifier.size(18.dp)
                                                     )
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (isThinking) {
+                                    item {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(end = 24.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(24.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            Brush.sweepGradient(
+                                                                listOf(
+                                                                    Color(0xFF91E4FB),
+                                                                    Color(0xFF86A8E7),
+                                                                    Color(0xFFD1A6FF),
+                                                                    Color(0xFF91E4FB)
+                                                                )
+                                                            )
+                                                        )
+                                                )
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Text(
+                                                    text = "Gemini is thinking...",
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = if (isCameraActive) Color.White else Color(0xFF0B57D0)
+                                                )
                                             }
                                         }
                                     }
