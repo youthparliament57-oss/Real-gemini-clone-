@@ -82,6 +82,7 @@ fun GeminiWelcomeScreen(
         // Centered authentic 4-pointed Gemini Star
         GeminiStarIcon(
             size = 56.dp,
+            isPulsing = true,
             modifier = Modifier.testTag("gemini_welcome_star")
         )
 

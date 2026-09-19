@@ -57,10 +57,8 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Videocam
@@ -126,9 +124,7 @@ fun GeminiLiveDialog(
     var isListening by remember { mutableStateOf(true) }
     var liveSpokenText by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
-    var showVoiceSelector by remember { mutableStateOf(false) }
     var showScreenShareSheet by remember { mutableStateOf(false) }
-    var currentVoice by remember { mutableStateOf(AvailableGeminiVoices.first()) }
     var speechAmplitude by remember { mutableStateOf(0f) }
     var isThinking by remember { mutableStateOf(false) }
     val geminiService = remember { com.example.gemini.data.remote.GeminiService() }
@@ -150,15 +146,15 @@ fun GeminiLiveDialog(
     var recordingJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val recordingScope = rememberCoroutineScope()
 
-    fun speakWithGeminiVoice(text: String, voice: GeminiVoice) {
-        ttsEngine?.setPitch(voice.pitch)
-        ttsEngine?.setSpeechRate(voice.speechRate)
+    fun speakWithGeminiVoice(text: String) {
+        ttsEngine?.setPitch(1.0f)
+        ttsEngine?.setSpeechRate(1.0f)
         
         // Auto-detect language (defaulting English text to US for high quality synthesis)
         val isHindi = text.any { it in '\u0900'..'\u097F' }
         val targetLocale = if (isHindi) Locale("hi", "IN") else Locale.US
  
-        // Match the selected voice characteristics with Google's high quality neural voices
+        // Match standard high quality neural voices
         try {
             ttsEngine?.language = targetLocale
             val systemVoices = ttsEngine?.voices
@@ -171,12 +167,6 @@ fun GeminiLiveDialog(
                     val name = v.name.lowercase()
                     if (name.contains("neural") || name.contains("wavenet") || name.contains("network")) score += 10
                     if (v.features.contains("neural") || v.features.contains("wavenet")) score += 5
-                    
-                    val isMale = voice.id in listOf("ursa", "dipper", "orion")
-                    if (isMale && (name.contains("male") || name.contains("guy") || name.contains("man"))) score += 5
-                    if (!isMale && (name.contains("female") || name.contains("girl") || name.contains("woman"))) score += 5
-                    
-                    if (name.contains(voice.id.take(2).lowercase())) score += 8
                     score
                 }
                 matchedSystemVoice?.let {
@@ -281,7 +271,7 @@ fun GeminiLiveDialog(
                                     t.localizedMessage ?: "Sorry, I had trouble processing that. Can you repeat it?"
                                 }
                                 transcriptHistory = transcriptHistory + LiveTranscriptItem(isUser = false, text = response)
-                                speakWithGeminiVoice(response, currentVoice)
+                                speakWithGeminiVoice(response)
                             }
                         }
                     }
@@ -311,18 +301,7 @@ fun GeminiLiveDialog(
             return
         }
 
-        val targetVoiceName = when (currentVoice.id) {
-            "nova" -> "Aoede"
-            "ursa" -> "Charon"
-            "vega" -> "Kore"
-            "lyra" -> "Aoede"
-            "dipper" -> "Puck"
-            "eclipse" -> "Charon"
-            "orion" -> "Fenrir"
-            "pegasus" -> "Kore"
-            "orbit" -> "Puck"
-            else -> "Aoede"
-        }
+        val targetVoiceName = "Aoede"
 
         isThinking = true
         isListening = false
@@ -746,22 +725,6 @@ fun GeminiLiveDialog(
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
 
-                            // Subtitles / Voice toggle
-                            IconButton(
-                                onClick = { showVoiceSelector = true },
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isCameraActive) Color(0x66000000) else Color.Transparent)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Subtitles,
-                                    contentDescription = "Choose Voice",
-                                    tint = if (isCameraActive) Color.White else Color(0xFF444746),
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-
                             // 3-dots Menu
                             Box {
                                 IconButton(
@@ -784,16 +747,6 @@ fun GeminiLiveDialog(
                                     onDismissRequest = { showMenu = false },
                                     modifier = Modifier.background(Color.White)
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Choose a voice", fontSize = 15.sp) },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = Color(0xFF0B57D0))
-                                        },
-                                        onClick = {
-                                            showMenu = false
-                                            showVoiceSelector = true
-                                        }
-                                    )
                                     DropdownMenuItem(
                                         text = { Text("Screen Share", fontSize = 15.sp) },
                                         leadingIcon = {
@@ -1209,20 +1162,7 @@ fun GeminiLiveDialog(
             }
         }
 
-    // Voice Selection Sheet
-    if (showVoiceSelector) {
-        GeminiLiveVoiceSelectorSheet(
-            selectedVoiceId = currentVoice.id,
-            onVoiceSelected = { voice ->
-                currentVoice = voice
-                speakWithGeminiVoice(voice.previewText, voice)
-            },
-            onPreviewVoice = { voice ->
-                speakWithGeminiVoice(voice.previewText, voice)
-            },
-            onDismiss = { showVoiceSelector = false }
-        )
-    }
+
 
     // Screen Share Sheet
     if (showScreenShareSheet) {
