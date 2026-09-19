@@ -9,6 +9,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.widget.Toast
 import kotlin.math.sin
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -151,15 +152,35 @@ fun GeminiLiveDialog(
     // Text To Speech instance
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
-        val tts = TextToSpeech(context) { status ->
+        var tts: TextToSpeech? = null
+        tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                ttsEngine?.language = Locale.getDefault()
+                tts?.language = Locale.getDefault()
+                // Auto-choose premium network neural voice if available
+                tts?.voices?.find { v -> v.name.lowercase().contains("en-us") && v.name.lowercase().contains("network") }?.let {
+                    tts?.voice = it
+                }
+                
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {
+                        isSpeaking = true
+                        isListening = false
+                    }
+                    override fun onDone(utteranceId: String?) {
+                        isSpeaking = false
+                        isListening = true
+                    }
+                    override fun onError(utteranceId: String?) {
+                        isSpeaking = false
+                        isListening = true
+                    }
+                })
             }
         }
         ttsEngine = tts
         onDispose {
-            tts.stop()
-            tts.shutdown()
+            tts?.stop()
+            tts?.shutdown()
         }
     }
 
@@ -755,7 +776,25 @@ fun GeminiLiveDialog(
     if (showScreenShareSheet) {
         GeminiLiveScreenShareSheet(
             onStartScreenShare = {
-                Toast.makeText(context, "Screen share connected with Gemini Live", Toast.LENGTH_SHORT).show()
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(context)) {
+                    val intent = Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:${context.packageName}")
+                    ).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                    Toast.makeText(context, "Please enable Screen Overlay permission for Gemini Live", Toast.LENGTH_LONG).show()
+                } else {
+                    val serviceIntent = Intent(context, com.example.gemini.service.GeminiOverlayService::class.java)
+                    context.startService(serviceIntent)
+                    onDismiss()
+                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(homeIntent)
+                }
             },
             onDismiss = { showScreenShareSheet = false }
         )
