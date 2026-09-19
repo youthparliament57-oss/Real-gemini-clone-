@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import java.util.Locale
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -66,12 +67,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val currentlySpeakingMessageId: StateFlow<String?> = _currentlySpeakingMessageId.asStateFlow()
 
     private var textToSpeech: TextToSpeech? = null
+    private var messagesJob: Job? = null
 
     init {
         // Initialize TextToSpeech engine
         textToSpeech = TextToSpeech(application) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                textToSpeech?.language = Locale.getDefault()
+                val locale = Locale.getDefault()
+                textToSpeech?.language = locale
+                
+                // Select highest quality neural/wavenet voice if available
+                try {
+                    val availableVoices = textToSpeech?.voices
+                    if (!availableVoices.isNullOrEmpty()) {
+                        val bestVoice = availableVoices.filter { voice ->
+                            voice.locale.language == locale.language
+                        }.maxByOrNull { voice ->
+                            var score = 0
+                            val name = voice.name.lowercase()
+                            if (name.contains("neural") || name.contains("wavenet") || name.contains("network")) score += 10
+                            if (voice.features.contains("neural") || voice.features.contains("wavenet")) score += 5
+                            if (voice.quality >= 400) score += 3
+                            score
+                        }
+                        bestVoice?.let {
+                            textToSpeech?.voice = it
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Fallback gracefully
+                }
             }
         }
 
@@ -97,9 +122,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectSession(sessionId: String) {
+        if (_currentSessionId.value == sessionId && messagesJob?.isActive == true) return
         _currentSessionId.value = sessionId
-        viewModelScope.launch {
+        messagesJob?.cancel()
+        messagesJob = viewModelScope.launch {
             repository.getMessages(sessionId).collect { msgs ->
+                // Maintain the thinking placeholder if active
+                if (_isThinking.value) {
+                    val containsThinking = msgs.any { it.isThinking }
+                    if (!containsThinking) {
+                        _currentMessages.value = msgs + ChatMessage(
+                            sessionId = sessionId,
+                            isUser = false,
+                            content = "",
+                            isThinking = true
+                        )
+                        return@collect
+                    }
+                }
                 _currentMessages.value = msgs
             }
         }
@@ -123,6 +163,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _inputText.value = ""
             _selectedImageUri.value = null
             selectModel(role.defaultModel)
+            
+            // Instantly trigger active message tracking for this brand-new session
+            selectSession(newSession.id)
         }
     }
 
@@ -178,46 +221,51 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _selectedImageUri.value = null
 
         viewModelScope.launch {
-            // 1. Save user message to database
-            val userMsg = repository.saveUserMessage(
-                sessionId = sessionId,
-                content = prompt,
-                imageUri = imageUri?.toString()
-            )
+            try {
+                // 1. Save user message to database
+                val userMsg = repository.saveUserMessage(
+                    sessionId = sessionId,
+                    content = prompt,
+                    imageUri = imageUri?.toString()
+                )
 
-            // Add placeholder thinking message in UI
-            _isThinking.value = true
-            val thinkingMsg = ChatMessage(
-                sessionId = sessionId,
-                isUser = false,
-                content = "",
-                isThinking = true
-            )
-            _currentMessages.value = _currentMessages.value + thinkingMsg
+                // Add placeholder thinking message in UI
+                _isThinking.value = true
+                val thinkingMsg = ChatMessage(
+                    sessionId = sessionId,
+                    isUser = false,
+                    content = "",
+                    isThinking = true
+                )
+                _currentMessages.value = _currentMessages.value + thinkingMsg
 
-            // Load Bitmap if image was attached
-            val bitmap = imageUri?.let { uri ->
-                loadBitmapFromUri(getApplication(), uri)
+                // Load Bitmap if image was attached
+                val bitmap = imageUri?.let { uri ->
+                    loadBitmapFromUri(getApplication(), uri)
+                }
+
+                // Call Gemini API passing the system instruction for the chosen role
+                val systemInstruction = _currentSessionRole.value.systemInstruction
+                val result = repository.callGemini(
+                    history = _currentMessages.value.filter { !it.isThinking },
+                    prompt = prompt,
+                    bitmap = bitmap,
+                    model = _currentModel.value,
+                    customApiKey = _customApiKey.value,
+                    systemInstruction = systemInstruction
+                )
+
+                // Save AI message to database
+                val responseText = result.getOrElse {
+                    "Unable to get response from Gemini. Please check your network connection or API key."
+                }
+                repository.saveAiResponse(sessionId, responseText)
+            } catch (e: Exception) {
+                repository.saveAiResponse(sessionId, "Error occurred: ${e.localizedMessage ?: "Unknown compilation or execution issue."}")
+            } finally {
+                _isThinking.value = false
+                _currentMessages.value = _currentMessages.value.filter { !it.isThinking }
             }
-
-            // Call Gemini API passing the system instruction for the chosen role
-            val systemInstruction = _currentSessionRole.value.systemInstruction
-            val result = repository.callGemini(
-                history = _currentMessages.value.filter { !it.isThinking },
-                prompt = prompt,
-                bitmap = bitmap,
-                model = _currentModel.value,
-                customApiKey = _customApiKey.value,
-                systemInstruction = systemInstruction
-            )
-
-            _isThinking.value = false
-
-            // Save AI message to database
-            val responseText = result.getOrElse {
-                "Unable to get response from Gemini. Please check your network connection or API key."
-            }
-            repository.saveAiResponse(sessionId, responseText)
         }
     }
 

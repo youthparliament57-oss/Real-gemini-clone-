@@ -126,10 +126,29 @@ class GeminiOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
     private fun initTextToSpeech() {
         ttsEngine = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                ttsEngine?.language = Locale.getDefault()
-                // Use a high-quality neural female voice if available
-                ttsEngine?.voices?.find { v -> v.name.lowercase().contains("en-us") && v.name.lowercase().contains("network") }?.let {
-                    ttsEngine?.voice = it
+                val locale = Locale.getDefault()
+                ttsEngine?.language = locale
+                
+                // Select highest quality neural/wavenet voice matching current locale if available
+                try {
+                    val availableVoices = ttsEngine?.voices
+                    if (!availableVoices.isNullOrEmpty()) {
+                        val bestVoice = availableVoices.filter { voice ->
+                            voice.locale.language == locale.language
+                        }.maxByOrNull { voice ->
+                            var score = 0
+                            val name = voice.name.lowercase()
+                            if (name.contains("neural") || name.contains("wavenet") || name.contains("network")) score += 10
+                            if (voice.features.contains("neural") || voice.features.contains("wavenet")) score += 5
+                            if (voice.quality >= 400) score += 3
+                            score
+                        }
+                        bestVoice?.let {
+                            ttsEngine?.voice = it
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Fallback gracefully
                 }
                 
                 ttsEngine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {

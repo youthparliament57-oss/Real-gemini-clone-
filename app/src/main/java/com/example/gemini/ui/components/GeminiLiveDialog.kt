@@ -135,6 +135,35 @@ fun GeminiLiveDialog(
     fun speakWithGeminiVoice(text: String, voice: GeminiVoice) {
         ttsEngine?.setPitch(voice.pitch)
         ttsEngine?.setSpeechRate(voice.speechRate)
+        
+        // Match the selected voice characteristics with Google's high quality neural voices
+        try {
+            val systemVoices = ttsEngine?.voices
+            if (!systemVoices.isNullOrEmpty()) {
+                val defaultLocale = Locale.getDefault()
+                val matchedSystemVoice = systemVoices.filter { v ->
+                    v.locale.language == defaultLocale.language
+                }.maxByOrNull { v ->
+                    var score = 0
+                    val name = v.name.lowercase()
+                    if (name.contains("neural") || name.contains("wavenet") || name.contains("network")) score += 10
+                    if (v.features.contains("neural") || v.features.contains("wavenet")) score += 5
+                    
+                    val isMale = voice.id in listOf("ursa", "dipper", "orion")
+                    if (isMale && (name.contains("male") || name.contains("guy") || name.contains("man"))) score += 5
+                    if (!isMale && (name.contains("female") || name.contains("girl") || name.contains("woman"))) score += 5
+                    
+                    if (name.contains(voice.id.take(2).lowercase())) score += 8
+                    score
+                }
+                matchedSystemVoice?.let {
+                    ttsEngine?.voice = it
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback gracefully
+        }
+        
         ttsEngine?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "gemini_live_tts")
         isSpeaking = true
     }
