@@ -5,6 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.MediaRecorder
+import android.media.AudioManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -12,6 +17,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.widget.Toast
 import kotlin.math.sin
+import kotlinx.coroutines.Dispatchers
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -131,6 +137,14 @@ fun GeminiLiveDialog(
     // Speech & Audio Engine references
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+
+    // True Bidirectional WebSockets Gemini Live references
+    var isWebSocketConnected by remember { mutableStateOf(false) }
+    val webSocketClient = remember { com.example.gemini.data.remote.GeminiLiveWebSocketClient() }
+    var audioRecord by remember { mutableStateOf<AudioRecord?>(null) }
+    var audioTrack by remember { mutableStateOf<AudioTrack?>(null) }
+    var recordingJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val recordingScope = rememberCoroutineScope()
 
     fun speakWithGeminiVoice(text: String, voice: GeminiVoice) {
         ttsEngine?.setPitch(voice.pitch)
@@ -252,11 +266,146 @@ fun GeminiLiveDialog(
         }
     }
 
+    fun startRealLiveSession() {
+        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
+        if (apiKey.isBlank() || apiKey.contains("MY_GEMINI_API_KEY")) {
+            startListening()
+            return
+        }
+
+        val targetVoiceName = when (currentVoice.id) {
+            "nova" -> "Aoede"
+            "ursa" -> "Charon"
+            "vega" -> "Kore"
+            "lyra" -> "Aoede"
+            "dipper" -> "Puck"
+            "eclipse" -> "Charon"
+            "orion" -> "Fenrir"
+            "pegasus" -> "Kore"
+            "orbit" -> "Puck"
+            else -> "Aoede"
+        }
+
+        isThinking = true
+        isListening = false
+
+        recordingJob?.cancel()
+        isWebSocketConnected = false
+        webSocketClient.close()
+
+        webSocketClient.connect(
+            apiKey = apiKey,
+            modelName = "models/gemini-2.0-flash-exp",
+            voiceName = targetVoiceName,
+            systemInstruction = "You are a warm, direct, real-time voice conversational partner. Keep your responses brief, warm, natural, and conversational. Do not output markdown, use direct conversational speech.",
+            onAudioDataReceived = { audioBytes ->
+                try {
+                    if (audioTrack == null) {
+                        val sampleRate = 24000
+                        val minBufSize = AudioTrack.getMinBufferSize(
+                            sampleRate,
+                            AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT
+                        )
+                        audioTrack = AudioTrack(
+                            AudioManager.STREAM_MUSIC,
+                            sampleRate,
+                            AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                            minBufSize.coerceAtLeast(4096),
+                            AudioTrack.MODE_STREAM
+                        ).apply {
+                            play()
+                        }
+                    }
+                    audioTrack?.write(audioBytes, 0, audioBytes.size)
+                    isSpeaking = true
+                    isThinking = false
+                } catch (e: Exception) {
+                    android.util.Log.e("GeminiLiveDialog", "Playback error: ${e.message}")
+                }
+            },
+            onTextReceived = { text ->
+                val lastItem = transcriptHistory.lastOrNull()
+                if (lastItem != null && !lastItem.isUser) {
+                    transcriptHistory = transcriptHistory.dropLast(1) + LiveTranscriptItem(
+                        isUser = false,
+                        text = lastItem.text + text
+                    )
+                } else {
+                    transcriptHistory = transcriptHistory + LiveTranscriptItem(
+                        isUser = false,
+                        text = text
+                    )
+                }
+            },
+            onSessionConfigured = {
+                isWebSocketConnected = true
+                isThinking = false
+                isListening = true
+
+                recordingJob = recordingScope.launch(Dispatchers.IO) {
+                    try {
+                        val sampleRate = 16000
+                        val channelConfig = AudioFormat.CHANNEL_IN_MONO
+                        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+                        val minBufSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+
+                        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            val recorder = AudioRecord(
+                                MediaRecorder.AudioSource.MIC,
+                                sampleRate,
+                                channelConfig,
+                                audioFormat,
+                                minBufSize.coerceAtLeast(2048)
+                            )
+                            audioRecord = recorder
+                            recorder.startRecording()
+
+                            val buffer = ByteArray(2048)
+                            while (isWebSocketConnected) {
+                                val read = recorder.read(buffer, 0, buffer.size)
+                                if (read > 0) {
+                                    val chunk = buffer.copyOf(read)
+                                    webSocketClient.sendAudioChunk(chunk)
+
+                                    var sum = 0f
+                                    for (i in 0 until read step 2) {
+                                        val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 0xFF)).toShort()
+                                        sum += Math.abs(sample.toFloat())
+                                    }
+                                    val rms = sum / (read / 2)
+                                    val amplitudeNormalized = (rms / 32768f) * 15f
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        speechAmplitude = speechAmplitude * 0.7f + amplitudeNormalized.coerceIn(0f, 1f) * 0.3f
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("GeminiLiveDialog", "Recording error: ${e.message}")
+                    }
+                }
+            },
+            onError = { err ->
+                android.util.Log.e("GeminiLiveDialog", "WebSocket failed: ${err.message}", err)
+                isWebSocketConnected = false
+                isThinking = false
+                isListening = false
+                
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Real Live Voice Agent offline. Switching to local mode.", Toast.LENGTH_SHORT).show()
+                    startListening()
+                }
+            }
+        )
+    }
+
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startListening()
+            startRealLiveSession()
         } else {
             Toast.makeText(context, "Microphone permission is required for Gemini Live to listen to your voice.", Toast.LENGTH_SHORT).show()
         }
@@ -346,11 +495,25 @@ fun GeminiLiveDialog(
             android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (hasMic) {
-            startListening()
+            startRealLiveSession()
         } else {
             recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
         onDispose {
+            isWebSocketConnected = false
+            recordingJob?.cancel()
+            try {
+                audioRecord?.stop()
+                audioRecord?.release()
+            } catch (e: Exception) {}
+            audioRecord = null
+            try {
+                audioTrack?.stop()
+                audioTrack?.release()
+            } catch (e: Exception) {}
+            audioTrack = null
+            webSocketClient.close()
+
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
             speechRecognizer = null
