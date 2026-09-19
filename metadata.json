@@ -1,0 +1,6 @@
+{
+  "name": "Gemini",
+  "description": "Google Gemini chatbot interface with authentic white theme, sidebar drawer, floating pill input, and rich response formatting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
