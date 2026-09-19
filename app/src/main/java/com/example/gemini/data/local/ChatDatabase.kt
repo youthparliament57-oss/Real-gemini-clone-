@@ -18,7 +18,8 @@ data class ChatSessionEntity(
     @PrimaryKey val id: String,
     val title: String,
     val updatedAt: Long,
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    val chatbotRoleId: String = "general"
 )
 
 @Entity(tableName = "chat_messages")
@@ -40,6 +41,12 @@ interface ChatDao {
     @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     fun getMessagesForSession(sessionId: String): Flow<List<ChatMessageEntity>>
 
+    @Query("SELECT * FROM chat_sessions WHERE id = :id LIMIT 1")
+    suspend fun getSessionById(id: String): ChatSessionEntity?
+
+    @Query("UPDATE chat_sessions SET chatbotRoleId = :roleId WHERE id = :sessionId")
+    suspend fun updateSessionRole(sessionId: String, roleId: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSession(session: ChatSessionEntity)
 
@@ -59,7 +66,7 @@ interface ChatDao {
     suspend fun deleteMessagesForSession(sessionId: String)
 }
 
-@Database(entities = [ChatSessionEntity::class, ChatMessageEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ChatSessionEntity::class, ChatMessageEntity::class], version = 2, exportSchema = false)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 

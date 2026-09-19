@@ -24,7 +24,8 @@ class ChatRepository(context: Context) {
                 id = entity.id,
                 title = entity.title,
                 updatedAt = entity.updatedAt,
-                isPinned = entity.isPinned
+                isPinned = entity.isPinned,
+                chatbotRoleId = entity.chatbotRoleId
             )
         }
     }
@@ -44,18 +45,20 @@ class ChatRepository(context: Context) {
             }
         }
 
-    suspend fun createNewSession(initialTitle: String = "New chat"): ChatSession {
+    suspend fun createNewSession(initialTitle: String = "New chat", chatbotRoleId: String = "general"): ChatSession {
         val session = ChatSession(
             id = UUID.randomUUID().toString(),
             title = initialTitle,
-            updatedAt = System.currentTimeMillis()
+            updatedAt = System.currentTimeMillis(),
+            chatbotRoleId = chatbotRoleId
         )
         dao.insertSession(
             ChatSessionEntity(
                 id = session.id,
                 title = session.title,
                 updatedAt = session.updatedAt,
-                isPinned = false
+                isPinned = false,
+                chatbotRoleId = session.chatbotRoleId
             )
         )
         return session
@@ -86,13 +89,15 @@ class ChatRepository(context: Context) {
         )
         // Update session timestamp and title if it's the first message
         val titleSnippet = if (content.length > 28) content.take(28) + "…" else content
-        dao.updateSession(
-            ChatSessionEntity(
-                id = sessionId,
-                title = titleSnippet,
-                updatedAt = System.currentTimeMillis()
+        val existing = dao.getSessionById(sessionId)
+        if (existing != null) {
+            dao.updateSession(
+                existing.copy(
+                    title = titleSnippet,
+                    updatedAt = System.currentTimeMillis()
+                )
             )
-        )
+        }
         return userMsg
     }
 
@@ -124,14 +129,16 @@ class ChatRepository(context: Context) {
         prompt: String,
         bitmap: Bitmap? = null,
         model: GeminiModel = GeminiModel.FLASH_EXTENDED,
-        customApiKey: String? = null
+        customApiKey: String? = null,
+        systemInstruction: String? = null
     ): Result<String> {
         return geminiService.generateContent(
             messages = history,
             newPrompt = prompt,
             bitmap = bitmap,
             model = model,
-            customApiKey = customApiKey
+            customApiKey = customApiKey,
+            systemInstruction = systemInstruction
         )
     }
 
@@ -140,24 +147,30 @@ class ChatRepository(context: Context) {
     }
 
     suspend fun togglePinSession(session: ChatSession) {
-        dao.updateSession(
-            ChatSessionEntity(
-                id = session.id,
-                title = session.title,
-                updatedAt = session.updatedAt,
-                isPinned = !session.isPinned
+        val existing = dao.getSessionById(session.id)
+        if (existing != null) {
+            dao.updateSession(
+                existing.copy(
+                    isPinned = !existing.isPinned
+                )
             )
-        )
+        }
     }
 
     suspend fun renameSession(sessionId: String, newTitle: String) {
-        dao.updateSession(
-            ChatSessionEntity(
-                id = sessionId,
-                title = newTitle,
-                updatedAt = System.currentTimeMillis()
+        val existing = dao.getSessionById(sessionId)
+        if (existing != null) {
+            dao.updateSession(
+                existing.copy(
+                    title = newTitle,
+                    updatedAt = System.currentTimeMillis()
+                )
             )
-        )
+        }
+    }
+
+    suspend fun updateSessionRole(sessionId: String, roleId: String) {
+        dao.updateSessionRole(sessionId, roleId)
     }
 
     suspend fun deleteSession(sessionId: String) {

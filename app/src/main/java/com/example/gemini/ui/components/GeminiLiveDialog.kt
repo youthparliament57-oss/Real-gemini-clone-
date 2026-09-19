@@ -103,6 +103,7 @@ data class LiveTranscriptItem(
 
 @Composable
 fun GeminiLiveDialog(
+    currentModel: com.example.gemini.data.model.GeminiModel,
     onDismiss: () -> Unit,
     onSpeakToChat: (String) -> Unit,
     onMinimizeToBubble: () -> Unit = {}
@@ -195,7 +196,8 @@ fun GeminiLiveDialog(
                                 }
                                 val result = geminiService.generateContent(
                                     messages = mappedContext,
-                                    newPrompt = text
+                                    newPrompt = text,
+                                    model = currentModel
                                 )
                                 
                                 isThinking = false

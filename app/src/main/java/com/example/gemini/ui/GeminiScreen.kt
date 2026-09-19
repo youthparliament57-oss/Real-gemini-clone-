@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.gemini.ui.components.ChatbotRoleSelectorRow
 import com.example.gemini.ui.components.GeminiInputBar
 import com.example.gemini.ui.components.GeminiLiveDialog
 import com.example.gemini.ui.components.GeminiLiveFloatingBubble
@@ -69,6 +70,7 @@ fun GeminiScreen(
     val isSettingsOpen by viewModel.isSettingsOpen.collectAsState()
     val customApiKey by viewModel.customApiKey.collectAsState()
     val speakingId by viewModel.currentlySpeakingMessageId.collectAsState()
+    val currentSessionRole by viewModel.currentSessionRole.collectAsState()
 
     var isLiveMinimized by remember { mutableStateOf(false) }
     var isLiveBannerMuted by remember { mutableStateOf(false) }
@@ -179,6 +181,12 @@ fun GeminiScreen(
                         .padding(innerPadding)
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
+                        // Specialized Chatbot Role selector row
+                        ChatbotRoleSelectorRow(
+                            currentRole = currentSessionRole,
+                            onRoleSelected = { role -> viewModel.selectSessionRole(role) }
+                        )
+
                         // Live with Gemini Notification banner (Screenshot 4, 8)
                         if (isLiveOpen && isLiveMinimized) {
                             GeminiLiveNotificationBanner(
@@ -244,6 +252,7 @@ fun GeminiScreen(
     // Gemini Live Fullscreen Dialog
     if (isLiveOpen && !isLiveMinimized) {
         GeminiLiveDialog(
+            currentModel = currentModel,
             onDismiss = {
                 viewModel.closeLiveMode()
                 isLiveMinimized = false

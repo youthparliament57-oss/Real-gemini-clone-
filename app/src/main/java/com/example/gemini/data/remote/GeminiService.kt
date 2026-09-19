@@ -32,7 +32,8 @@ class GeminiService {
         newPrompt: String,
         bitmap: Bitmap? = null,
         model: GeminiModel = GeminiModel.FLASH_EXTENDED,
-        customApiKey: String? = null
+        customApiKey: String? = null,
+        systemInstruction: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = customApiKey?.takeIf { it.isNotBlank() }
             ?: runCatching { BuildConfig.GEMINI_API_KEY }.getOrNull()?.takeIf { it.isNotBlank() && !it.contains("MY_GEMINI_API_KEY") }
@@ -89,6 +90,16 @@ class GeminiService {
             generationConfig.put("temperature", 0.7)
             generationConfig.put("topP", 0.95)
             rootJson.put("generationConfig", generationConfig)
+
+            if (!systemInstruction.isNullOrBlank()) {
+                val systemInstructionObj = JSONObject()
+                val partsArray = JSONArray()
+                val partObj = JSONObject()
+                partObj.put("text", systemInstruction)
+                partsArray.put(partObj)
+                systemInstructionObj.put("parts", partsArray)
+                rootJson.put("systemInstruction", systemInstructionObj)
+            }
 
             val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()

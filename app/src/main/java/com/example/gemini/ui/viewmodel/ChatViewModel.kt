@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.gemini.data.model.ChatMessage
 import com.example.gemini.data.model.ChatSession
 import com.example.gemini.data.model.GeminiModel
+import com.example.gemini.data.model.ChatbotRole
 import com.example.gemini.data.repository.ChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -38,6 +40,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _currentModel = MutableStateFlow(GeminiModel.FLASH_EXTENDED)
     val currentModel: StateFlow<GeminiModel> = _currentModel.asStateFlow()
+
+    private val _currentSessionRole = MutableStateFlow(ChatbotRole.GENERAL)
+    val currentSessionRole: StateFlow<ChatbotRole> = _currentSessionRole.asStateFlow()
 
     private val _inputText = MutableStateFlow("")
     val inputText: StateFlow<String> = _inputText.asStateFlow()
@@ -70,6 +75,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Combine sessions list and current sessionId to track the current active chatbot role dynamically
+        viewModelScope.launch {
+            combine(repository.sessions, _currentSessionId) { list, id ->
+                list.find { it.id == id }?.chatbotRoleId
+            }.collect { roleId ->
+                val newRole = ChatbotRole.values().find { it.id == roleId } ?: ChatbotRole.GENERAL
+                _currentSessionRole.value = newRole
+            }
+        }
+
         // Initialize with either latest session or create a clean one
         viewModelScope.launch {
             val existing = repository.sessions.firstOrNull()?.firstOrNull()
@@ -88,15 +103,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _currentMessages.value = msgs
             }
         }
+        // Sync model when switching sessions
+        viewModelScope.launch {
+            val sList = repository.sessions.firstOrNull()
+            val currentSessionObj = sList?.find { it.id == sessionId }
+            currentSessionObj?.let {
+                val role = ChatbotRole.values().find { r -> r.id == it.chatbotRoleId } ?: ChatbotRole.GENERAL
+                _currentModel.value = role.defaultModel
+            }
+        }
     }
 
-    fun startNewChat() {
+    fun startNewChat(chatbotRoleId: String = "general") {
         viewModelScope.launch {
-            val newSession = repository.createNewSession("New chat")
+            val role = ChatbotRole.values().find { it.id == chatbotRoleId } ?: ChatbotRole.GENERAL
+            val newSession = repository.createNewSession("New chat", chatbotRoleId)
             _currentSessionId.value = newSession.id
             _currentMessages.value = emptyList()
             _inputText.value = ""
             _selectedImageUri.value = null
+            selectModel(role.defaultModel)
+        }
+    }
+
+    fun selectSessionRole(role: ChatbotRole) {
+        val sessionId = _currentSessionId.value ?: return
+        viewModelScope.launch {
+            repository.updateSessionRole(sessionId, role.id)
+            selectModel(role.defaultModel)
         }
     }
 
@@ -166,13 +200,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 loadBitmapFromUri(getApplication(), uri)
             }
 
-            // Call Gemini API
+            // Call Gemini API passing the system instruction for the chosen role
+            val systemInstruction = _currentSessionRole.value.systemInstruction
             val result = repository.callGemini(
                 history = _currentMessages.value.filter { !it.isThinking },
                 prompt = prompt,
                 bitmap = bitmap,
                 model = _currentModel.value,
-                customApiKey = _customApiKey.value
+                customApiKey = _customApiKey.value,
+                systemInstruction = systemInstruction
             )
 
             _isThinking.value = false
