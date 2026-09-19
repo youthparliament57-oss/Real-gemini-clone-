@@ -70,6 +70,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var messagesJob: Job? = null
 
     init {
+        // Load persisted API key from SharedPreferences
+        val prefs = application.getSharedPreferences("gemini_prefs", Context.MODE_PRIVATE)
+        _customApiKey.value = prefs.getString("custom_api_key", "") ?: ""
+
         // Initialize TextToSpeech engine
         textToSpeech = TextToSpeech(application) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -207,6 +211,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCustomApiKey(key: String) {
         _customApiKey.value = key
+        val prefs = getApplication<Application>().getSharedPreferences("gemini_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("custom_api_key", key).apply()
     }
 
     fun sendMessage(customPrompt: String? = null) {
