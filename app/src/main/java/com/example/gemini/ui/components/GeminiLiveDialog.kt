@@ -241,14 +241,19 @@ fun GeminiLiveDialog(
                                         content = it.text
                                     )
                                 }
+                                val prefs = context.getSharedPreferences("gemini_prefs", android.content.Context.MODE_PRIVATE)
+                                val savedKey = prefs.getString("custom_api_key", "") ?: ""
                                 val result = geminiService.generateContent(
                                     messages = mappedContext,
                                     newPrompt = text,
-                                    model = currentModel
+                                    model = currentModel,
+                                    customApiKey = savedKey
                                 )
                                 
                                 isThinking = false
-                                val response = result.getOrElse { "Sorry, I had trouble processing that. Can you repeat it?" }
+                                val response = result.getOrElse { t ->
+                                    t.localizedMessage ?: "Sorry, I had trouble processing that. Can you repeat it?"
+                                }
                                 transcriptHistory = transcriptHistory + LiveTranscriptItem(isUser = false, text = response)
                                 speakWithGeminiVoice(response, currentVoice)
                             }
@@ -271,7 +276,10 @@ fun GeminiLiveDialog(
     }
 
     fun startRealLiveSession() {
-        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
+        val prefs = context.getSharedPreferences("gemini_prefs", android.content.Context.MODE_PRIVATE)
+        val savedKey = prefs.getString("custom_api_key", "") ?: ""
+        val apiKey = if (savedKey.isNotBlank()) savedKey else com.example.BuildConfig.GEMINI_API_KEY
+
         if (apiKey.isBlank() || apiKey.contains("MY_GEMINI_API_KEY")) {
             startListening()
             return
@@ -299,7 +307,7 @@ fun GeminiLiveDialog(
 
         webSocketClient.connect(
             apiKey = apiKey,
-            modelName = "models/gemini-2.0-flash-exp",
+            modelName = "models/gemini-2.5-flash",
             voiceName = targetVoiceName,
             systemInstruction = "You are a warm, direct, real-time voice conversational partner. Keep your responses brief, warm, natural, and conversational. Do not output markdown, use direct conversational speech.",
             onAudioDataReceived = { audioBytes ->
