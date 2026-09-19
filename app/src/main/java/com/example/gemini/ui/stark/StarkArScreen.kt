@@ -13,7 +13,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,7 +31,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ControlCamera
@@ -41,9 +39,9 @@ import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,8 +58,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -72,28 +67,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.gemini.ui.components.GeminiLiveCameraView
-import kotlin.math.PI
-import kotlin.math.roundToInt
-
-/**
- * 3D Spatial Room Panel Model
- * Holds true 3D World Space coordinates (X, Y, Z in meters) in the user's room.
- * When isPinned = true, it stays fixed at worldPos.
- * When the user turns the phone, it moves dynamically with realistic perspective projection.
- */
-data class StarkRoomPanel(
-    val id: String,
-    val type: StarkWidgetType,
-    var worldPos: Vector3D,
-    var baseScale: Float = 1.0f,
-    var isMinimized: Boolean = false,
-    var isPinned: Boolean = true // When true, locked in 3D world room coordinate
-)
+import com.google.ar.core.Frame
 
 @Composable
 fun StarkArScreen(
@@ -145,14 +123,29 @@ fun StarkArScreen(
     var selectedCatalogType by remember { mutableStateOf(StarkWidgetType.ARC_REACTOR) }
     var activeCoordinateDialogPanelId by remember { mutableStateOf<String?>(null) }
     var isSpawnPresetMenuOpen by remember { mutableStateOf(false) }
+    var lastHitSurfaceNotice by remember { mutableStateOf<String?>(null) }
 
-    // Real-Time 6-DoF Sensor Fusion Engine (Gyroscope + Accelerometer + Speedometer + Magnetometer)
+    // ARCore Session & Matrices Cache
+    var latestArFrame by remember { mutableStateOf<Frame?>(null) }
+    val arViewMatrix = remember { FloatArray(16) }
+    val arProjMatrix = remember { FloatArray(16) }
+
+    // Real-Time ARCore Visual SLAM Engine with Optical Flow + Surface Detection
+    val (arCoreState, arController) = rememberStarkArCoreSession(
+        onFrameUpdate = { frame, viewM, projM ->
+            latestArFrame = frame
+            System.arraycopy(viewM, 0, arViewMatrix, 0, 16)
+            System.arraycopy(projM, 0, arProjMatrix, 0, 16)
+        }
+    )
+
+    // 6-DoF Sensor Fusion Engine (Gyro + Accel + Magnetometer + Speedometer)
     val (sixDoFState, resetOrigin) = rememberStark6DoFSensor()
 
-    // 3D Placed holographic panels anchored in the room's physical coordinate space (meters)
+    // 3D Spatial Room Panels (Supporting both physical surface ARCore Anchors and metric 6-DoF vectors)
     val roomPanels = remember {
         mutableStateListOf(
-            StarkRoomPanel(
+            StarkSpatialAnchorPanel(
                 id = "p-1",
                 type = StarkWidgetType.ARC_REACTOR,
                 worldPos = Vector3D(x = -0.35f, y = 0.15f, z = 1.8f),
@@ -160,7 +153,7 @@ fun StarkArScreen(
                 isMinimized = false,
                 isPinned = true
             ),
-            StarkRoomPanel(
+            StarkSpatialAnchorPanel(
                 id = "p-2",
                 type = StarkWidgetType.VISION_SCANNER,
                 worldPos = Vector3D(x = 0.85f, y = -0.2f, z = 1.9f),
@@ -177,21 +170,24 @@ fun StarkArScreen(
             when (action) {
                 is JarvisVoiceAction.SpawnWidget -> {
                     val newId = "p-${System.currentTimeMillis()}"
-                    // Spawn 3D dashboard directly in front of camera's current 3D line-of-sight
+                    // Try anchoring via ARCore in front of camera
+                    val anchor = arController.createAnchorInFrontOfCamera(1.6f, latestArFrame)
                     val spawnPos = StarkSpatialMath.calculateWorldPointInFrontOfCamera(
                         cameraPos = sixDoFState.cameraPos,
                         yawDeg = sixDoFState.azimuthDegrees,
                         pitchDeg = sixDoFState.pitchDegrees,
-                        distanceMeters = 1.7f
+                        distanceMeters = 1.6f
                     )
                     roomPanels.add(
-                        StarkRoomPanel(
+                        StarkSpatialAnchorPanel(
                             id = newId,
                             type = action.type,
                             worldPos = spawnPos,
+                            arCoreAnchor = anchor,
                             baseScale = 1.0f,
                             isMinimized = false,
-                            isPinned = true
+                            isPinned = true,
+                            isSurfaceAnchored = (anchor != null)
                         )
                     )
                 }
@@ -204,6 +200,8 @@ fun StarkArScreen(
                             z = baseVec.z
                         )
                         panel.worldPos = staggered
+                        panel.arCoreAnchor = null
+                        panel.isSurfaceAnchored = false
                         panel.isPinned = true
                     }
                 }
@@ -226,10 +224,10 @@ fun StarkArScreen(
                     roomPanels.clear()
                     resetOrigin()
                     roomPanels.add(
-                        StarkRoomPanel("p-1", StarkWidgetType.ARC_REACTOR, Vector3D(-0.35f, 0.15f, 1.8f), 1.0f, false, true)
+                        StarkSpatialAnchorPanel("p-1", StarkWidgetType.ARC_REACTOR, Vector3D(-0.35f, 0.15f, 1.8f), null, 1.0f, false, true)
                     )
                     roomPanels.add(
-                        StarkRoomPanel("p-2", StarkWidgetType.VISION_SCANNER, Vector3D(0.85f, -0.2f, 1.9f), 1.0f, false, true)
+                        StarkSpatialAnchorPanel("p-2", StarkWidgetType.VISION_SCANNER, Vector3D(0.85f, -0.2f, 1.9f), null, 1.0f, false, true)
                     )
                 }
                 is JarvisVoiceAction.ToggleGyro -> {
@@ -248,12 +246,57 @@ fun StarkArScreen(
         val screenWidthPx = constraints.maxWidth.toFloat()
         val screenHeightPx = constraints.maxHeight.toFloat()
 
-        // 1. Fullscreen Camera View (The Physical Room)
+        // 1. Fullscreen Camera View (Physical Room Optical Feed)
         if (hasCameraPermission) {
             GeminiLiveCameraView(
                 isFrontCamera = isFrontCamera,
                 onPreviewReady = {},
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { tapOffset ->
+                            // Tap on any physical surface in room (desk, table, floor) to place selected dashboard
+                            val hitAnchor = arController.hitTestScreenPoint(tapOffset.x, tapOffset.y, latestArFrame)
+                            val newId = "p-${System.currentTimeMillis()}"
+                            if (hitAnchor != null) {
+                                val hp = hitAnchor.pose
+                                roomPanels.add(
+                                    StarkSpatialAnchorPanel(
+                                        id = newId,
+                                        type = selectedCatalogType,
+                                        worldPos = Vector3D(hp.tx(), hp.ty(), hp.tz()),
+                                        arCoreAnchor = hitAnchor,
+                                        baseScale = 1.0f,
+                                        isMinimized = false,
+                                        isPinned = true,
+                                        isSurfaceAnchored = true
+                                    )
+                                )
+                                lastHitSurfaceNotice = "SURFACE ANCHOR CREATED ON ROOM PLANE"
+                            } else {
+                                // Raycast spawn in front of camera
+                                val spawnPos = StarkSpatialMath.calculateWorldPointInFrontOfCamera(
+                                    cameraPos = sixDoFState.cameraPos,
+                                    yawDeg = sixDoFState.azimuthDegrees,
+                                    pitchDeg = sixDoFState.pitchDegrees,
+                                    distanceMeters = 1.6f
+                                )
+                                roomPanels.add(
+                                    StarkSpatialAnchorPanel(
+                                        id = newId,
+                                        type = selectedCatalogType,
+                                        worldPos = spawnPos,
+                                        arCoreAnchor = null,
+                                        baseScale = 1.0f,
+                                        isMinimized = false,
+                                        isPinned = true,
+                                        isSurfaceAnchored = false
+                                    )
+                                )
+                                lastHitSurfaceNotice = "SPATIAL VOXEL ANCHORED IN 3D ROOM"
+                            }
+                        }
+                    }
             )
         } else {
             Box(
@@ -312,7 +355,7 @@ fun StarkArScreen(
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 15f), 0f)
             )
 
-            // Central Targeting Crosshairs
+            // Central Targeting Reticle
             val reticleSize = 36.dp.toPx()
             drawLine(cyanGlow, Offset(center.x - reticleSize, center.y), Offset(center.x + reticleSize, center.y), 1.dp.toPx())
             drawLine(cyanGlow, Offset(center.x, center.y - reticleSize), Offset(center.x, center.y + reticleSize), 1.dp.toPx())
@@ -340,193 +383,21 @@ fun StarkArScreen(
             drawLine(cyanGlow, Offset(size.width - pad, size.height - pad), Offset(size.width - pad, size.height - pad - cornerLen), stroke)
         }
 
-        // 3. True 3D Floating Holographic Dashboards in the Room
-        // Each panel is projected from its fixed 3D room coordinate (X, Y, Z) to 2D screen coordinates.
-        // If the user turns the camera away from the panel, it naturally leaves the FoV, with a Stark Direction Arrow indicating where it is!
-        roomPanels.forEach { panel ->
-            var panelScale by remember(panel.id) { mutableFloatStateOf(panel.baseScale) }
-            var isMinimized by remember(panel.id) { mutableStateOf(panel.isMinimized) }
-            var isPinned by remember(panel.id) { mutableStateOf(panel.isPinned) }
+        // 3. True 3D Floating & Surface-Anchored Holographic Dashboards in the Room
+        StarkSpatialPanelRenderer(
+            panels = roomPanels,
+            arCoreState = arCoreState,
+            sixDoFState = sixDoFState,
+            isGyroEnabled = isGyroTrackingEnabled,
+            viewMatrix = arViewMatrix,
+            projMatrix = arProjMatrix,
+            screenWidthPx = screenWidthPx,
+            screenHeightPx = screenHeightPx,
+            onRemovePanel = { id -> roomPanels.removeIf { it.id == id } },
+            onRelocatePanel = { id -> activeCoordinateDialogPanelId = id }
+        )
 
-            // Project 3D room coordinate to 2D camera viewport
-            val proj = StarkSpatialMath.projectWorldPointToScreen(
-                worldPos = panel.worldPos,
-                cameraPos = if (isPinned && isGyroTrackingEnabled) sixDoFState.cameraPos else Vector3D(0f, 0f, 0f),
-                cameraYawDeg = if (isPinned && isGyroTrackingEnabled) sixDoFState.azimuthDegrees else 0f,
-                cameraPitchDeg = if (isPinned && isGyroTrackingEnabled) sixDoFState.pitchDegrees else 0f,
-                screenWidthPx = screenWidthPx,
-                screenHeightPx = screenHeightPx,
-                baseScale = panelScale
-            )
-
-            if (proj.isVisibleInFov) {
-                // Widget is in front of camera and inside the FoV
-                val cardWidthDp = 330.dp
-                val cardWidthPx = 330f * (context.resources.displayMetrics.density)
-
-                // Center the card on the 3D projected coordinate
-                val renderX = (proj.screenX - (cardWidthPx * proj.perspectiveScale) / 2f)
-                val renderY = (proj.screenY - 140f)
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(renderX.roundToInt(), renderY.roundToInt()) }
-                        .scale(proj.perspectiveScale)
-                        .width(cardWidthDp)
-                        .pointerInput(panel.id) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                // Dragging moves the 3D world coordinate in the plane orthogonal to camera gaze
-                                val yawRad = Math.toRadians(sixDoFState.azimuthDegrees.toDouble())
-                                val cosY = kotlin.math.cos(yawRad).toFloat()
-                                val sinY = kotlin.math.sin(yawRad).toFloat()
-
-                                val worldDx = (dragAmount.x * 0.003f) * cosY
-                                val worldDz = -(dragAmount.x * 0.003f) * sinY
-                                val worldDy = -(dragAmount.y * 0.003f)
-
-                                panel.worldPos = Vector3D(
-                                    x = panel.worldPos.x + worldDx,
-                                    y = panel.worldPos.y + worldDy,
-                                    z = panel.worldPos.z + worldDz
-                                )
-                            }
-                        }
-                ) {
-                    Column {
-                        // 3D Telemetry spatial tag above the widget
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .padding(bottom = 3.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(StarkColors.DarkVoidOpaque)
-                                .border(0.8.dp, StarkColors.CyanDim, RoundedCornerShape(3.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "DIST: ${String.format("%.2f", proj.distanceMeters)}m",
-                                color = StarkColors.Cyan,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Text(
-                                text = "POS: [${String.format("%.1f", panel.worldPos.x)}, ${String.format("%.1f", panel.worldPos.y)}, ${String.format("%.1f", panel.worldPos.z)}]",
-                                color = StarkColors.TextMuted,
-                                fontSize = 7.5.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            if (isPinned) {
-                                Text(
-                                    text = "3D-LOCKED",
-                                    color = StarkColors.Gold,
-                                    fontSize = 7.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-
-                        StarkWidgetView(
-                            type = panel.type,
-                            isPinned = isPinned,
-                            isMinimized = isMinimized,
-                            onPinToggle = {
-                                isPinned = !isPinned
-                                panel.isPinned = isPinned
-                            },
-                            onMinimizeToggle = {
-                                isMinimized = !isMinimized
-                                panel.isMinimized = isMinimized
-                            },
-                            onZoomIn = {
-                                if (panelScale < 1.6f) {
-                                    panelScale = (panelScale + 0.15f).coerceAtMost(1.6f)
-                                    panel.baseScale = panelScale
-                                }
-                            },
-                            onZoomOut = {
-                                if (panelScale > 0.55f) {
-                                    panelScale = (panelScale - 0.15f).coerceAtLeast(0.55f)
-                                    panel.baseScale = panelScale
-                                }
-                            },
-                            onRelocate = {
-                                activeCoordinateDialogPanelId = panel.id
-                            },
-                            onClose = {
-                                roomPanels.removeIf { it.id == panel.id }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            } else {
-                // Widget is outside the camera view field! Show a Stark HUD Edge Radar Beacon
-                // directing the user where in the physical room to look to see this dashboard!
-                val edgePadding = 48f
-                val centerX = screenWidthPx / 2f
-                val centerY = screenHeightPx / 2f
-
-                val cosA = kotlin.math.cos(proj.directionGuideAngleRad.toDouble()).toFloat()
-                val sinA = kotlin.math.sin(proj.directionGuideAngleRad.toDouble()).toFloat()
-
-                val beaconX = (centerX + cosA * (centerX - edgePadding)).coerceIn(16f, screenWidthPx - 100f)
-                val beaconY = (centerY + sinA * (centerY - edgePadding)).coerceIn(90f, screenHeightPx - 120f)
-                val arrowRotationDeg = Math.toDegrees(proj.directionGuideAngleRad.toDouble()).toFloat()
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(beaconX.roundToInt(), beaconY.roundToInt()) }
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(StarkColors.DarkVoidOpaque)
-                        .border(1.dp, StarkColors.Cyan, RoundedCornerShape(6.dp))
-                        .clickable {
-                            // Tap beacon to bring panel directly in front of current gaze
-                            panel.worldPos = StarkSpatialMath.calculateWorldPointInFrontOfCamera(
-                                cameraPos = sixDoFState.cameraPos,
-                                yawDeg = sixDoFState.azimuthDegrees,
-                                pitchDeg = sixDoFState.pitchDegrees,
-                                distanceMeters = 1.6f
-                            )
-                        }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.NearMe,
-                            contentDescription = "Look towards panel",
-                            tint = StarkColors.Cyan,
-                            modifier = Modifier
-                                .size(14.dp)
-                                .rotate(arrowRotationDeg)
-                        )
-                        Column {
-                            Text(
-                                text = panel.type.tag,
-                                color = StarkColors.Cyan,
-                                fontSize = 8.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Text(
-                                text = "${String.format("%.1f", proj.distanceMeters)}m",
-                                color = StarkColors.TextMuted,
-                                fontSize = 7.5.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Stark Top HUD Status Bar (Real-Time 6-DoF Telemetry & Speedometer)
+        // 4. Stark Top HUD Status Bar (ARCore SLAM + 6-DoF Sensor Fusion Status)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -534,19 +405,19 @@ fun StarkArScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Stark Logo & Active Systems Telemetry
+            // Stark Logo & Active SLAM Tracking Status
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(if (sixDoFState.isTrackingActive) StarkColors.Cyan else StarkColors.DangerRed)
+                        .background(if (arCoreState.isTrackingActive || sixDoFState.isTrackingActive) StarkColors.Cyan else StarkColors.DangerRed)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "STARK LAB 3D // 6-DoF",
+                            text = "STARK LAB AR // SLAM CORE",
                             color = StarkColors.TextBright,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Black,
@@ -561,7 +432,7 @@ fun StarkArScreen(
                                 .padding(horizontal = 4.dp, vertical = 1.dp)
                         ) {
                             Text(
-                                text = "PHASE 2 • 3D SPATIAL",
+                                text = if (arCoreState.isArCoreSupported) "ARCORE SLAM" else "6-DoF FUSION",
                                 color = StarkColors.Gold,
                                 fontSize = 7.sp,
                                 fontWeight = FontWeight.Bold,
@@ -570,7 +441,7 @@ fun StarkArScreen(
                         }
                     }
                     Text(
-                        text = "POS: [${String.format("%.1f", sixDoFState.cameraPos.x)}, ${String.format("%.1f", sixDoFState.cameraPos.y)}, ${String.format("%.1f", sixDoFState.cameraPos.z)}]m | SPD: ${String.format("%.2f", sixDoFState.speedMetersPerSec)}m/s | AZI: ${sixDoFState.azimuthDegrees.toInt()}° | PANELS: ${roomPanels.size}",
+                        text = "${arCoreState.trackingModeDescription} | POS: [${String.format("%.1f", sixDoFState.cameraPos.x)}, ${String.format("%.1f", sixDoFState.cameraPos.y)}, ${String.format("%.1f", sixDoFState.cameraPos.z)}]m | PLANES: ${arCoreState.detectedPlanesCount}",
                         color = StarkColors.TextMuted,
                         fontSize = 7.5.sp,
                         fontFamily = FontFamily.Monospace
@@ -578,7 +449,7 @@ fun StarkArScreen(
                 }
             }
 
-            // Quick Actions: JARVIS Mic, 6-DoF Lock Toggle, Reset Origin, Preset Spawner, Flip Camera, Close
+            // Quick Actions: JARVIS Mic, Gyro Lock, Reset Origin, Presets, Flip Camera, Close
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -621,7 +492,7 @@ fun StarkArScreen(
                 ) {
                     Icon(
                         imageVector = if (isGyroTrackingEnabled) Icons.Default.Explore else Icons.Default.ControlCamera,
-                        contentDescription = "Toggle 6-DoF Spatial Lock",
+                        contentDescription = "Toggle Spatial Lock",
                         tint = if (isGyroTrackingEnabled) StarkColors.Cyan else StarkColors.TextMuted,
                         modifier = Modifier.size(16.dp)
                     )
@@ -667,10 +538,10 @@ fun StarkArScreen(
                         resetOrigin()
                         roomPanels.clear()
                         roomPanels.add(
-                            StarkRoomPanel("p-1", StarkWidgetType.ARC_REACTOR, Vector3D(-0.35f, 0.15f, 1.8f), 1.0f, false, true)
+                            StarkSpatialAnchorPanel("p-1", StarkWidgetType.ARC_REACTOR, Vector3D(-0.35f, 0.15f, 1.8f), null, 1.0f, false, true)
                         )
                         roomPanels.add(
-                            StarkRoomPanel("p-2", StarkWidgetType.VISION_SCANNER, Vector3D(0.85f, -0.2f, 1.9f), 1.0f, false, true)
+                            StarkSpatialAnchorPanel("p-2", StarkWidgetType.VISION_SCANNER, Vector3D(0.85f, -0.2f, 1.9f), null, 1.0f, false, true)
                         )
                     },
                     modifier = Modifier
@@ -767,7 +638,7 @@ fun StarkArScreen(
                     .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = "MOVE CAMERA AROUND ROOM • PANELS STAY LOCKED IN 3D SPACE • RADAR ARROWS GUIDE OFF-SCREEN",
+                    text = "TAP SCREEN TO ANCHOR ON SURFACE / ROOM • PANELS STAY FIXED IN REAL SPACE",
                     color = StarkColors.Cyan,
                     fontSize = 7.sp,
                     fontWeight = FontWeight.Bold,
@@ -827,13 +698,15 @@ fun StarkArScreen(
                                 .clickable {
                                     val newId = "p-${System.currentTimeMillis()}"
                                     roomPanels.add(
-                                        StarkRoomPanel(
+                                        StarkSpatialAnchorPanel(
                                             id = newId,
                                             type = selectedCatalogType,
                                             worldPos = preset.worldVector,
+                                            arCoreAnchor = null,
                                             baseScale = 1.0f,
                                             isMinimized = false,
-                                            isPinned = true
+                                            isPinned = true,
+                                            isSurfaceAnchored = false
                                         )
                                     )
                                     isSpawnPresetMenuOpen = false
@@ -861,7 +734,7 @@ fun StarkArScreen(
             }
         }
 
-        // 7. Relocate Coordinate Dialog (When user taps Location button on a card)
+        // 7. Relocate Coordinate Dialog
         if (activeCoordinateDialogPanelId != null) {
             val panelToRelocate = roomPanels.find { it.id == activeCoordinateDialogPanelId }
             if (panelToRelocate != null) {
@@ -924,6 +797,8 @@ fun StarkArScreen(
                                     .border(1.dp, StarkColors.CyanDim, RoundedCornerShape(4.dp))
                                     .clickable {
                                         panelToRelocate.worldPos = preset.worldVector
+                                        panelToRelocate.arCoreAnchor = null
+                                        panelToRelocate.isSurfaceAnchored = false
                                         panelToRelocate.isPinned = true
                                         activeCoordinateDialogPanelId = null
                                     }
@@ -975,21 +850,23 @@ fun StarkArScreen(
                 onSelectType = { selectedCatalogType = it },
                 onSpawnWidget = { type ->
                     val newId = "p-${System.currentTimeMillis()}"
-                    // Spawn at the 3D position directly in front of the camera's gaze
                     val forwardPos = StarkSpatialMath.calculateWorldPointInFrontOfCamera(
                         cameraPos = sixDoFState.cameraPos,
                         yawDeg = sixDoFState.azimuthDegrees,
                         pitchDeg = sixDoFState.pitchDegrees,
                         distanceMeters = 1.6f
                     )
+                    val anchor = arController.createAnchorInFrontOfCamera(1.6f, latestArFrame)
                     roomPanels.add(
-                        StarkRoomPanel(
+                        StarkSpatialAnchorPanel(
                             id = newId,
                             type = type,
                             worldPos = forwardPos,
+                            arCoreAnchor = anchor,
                             baseScale = 1.0f,
                             isMinimized = false,
-                            isPinned = true
+                            isPinned = true,
+                            isSurfaceAnchored = (anchor != null)
                         )
                     )
                 }
