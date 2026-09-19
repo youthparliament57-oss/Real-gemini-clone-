@@ -35,7 +35,12 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun StarkMissionMatrixWidget(
     isPinned: Boolean = false,
+    isMinimized: Boolean = false,
     onPinToggle: (() -> Unit)? = null,
+    onMinimizeToggle: (() -> Unit)? = null,
+    onZoomIn: (() -> Unit)? = null,
+    onZoomOut: (() -> Unit)? = null,
+    onRelocate: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -57,10 +62,16 @@ fun StarkMissionMatrixWidget(
         subtitle = StarkWidgetType.MISSION_MATRIX.subtitle,
         tag = StarkWidgetType.MISSION_MATRIX.tag,
         isPinned = isPinned,
+        isMinimized = isMinimized,
         onPinToggle = onPinToggle,
+        onMinimizeToggle = onMinimizeToggle,
+        onZoomIn = onZoomIn,
+        onZoomOut = onZoomOut,
+        onRelocate = onRelocate,
         onClose = onClose,
         modifier = modifier
     ) {
+
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)

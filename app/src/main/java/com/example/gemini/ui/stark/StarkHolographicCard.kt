@@ -26,6 +26,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.LocationSearching
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -49,11 +56,17 @@ fun StarkHolographicCard(
     subtitle: String = "",
     tag: String = "HUD-01",
     isPinned: Boolean = false,
+    isMinimized: Boolean = false,
     onPinToggle: (() -> Unit)? = null,
+    onMinimizeToggle: (() -> Unit)? = null,
+    onZoomIn: (() -> Unit)? = null,
+    onZoomOut: (() -> Unit)? = null,
+    onRelocate: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+
     val infiniteTransition = rememberInfiniteTransition(label = "stark_card_scanline")
     val scanlineY by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -158,31 +171,118 @@ fun StarkHolographicCard(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (onPinToggle != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    // Zoom Out Button
+                    if (onZoomOut != null && !isMinimized) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(if (isPinned) StarkColors.Cyan.copy(alpha = 0.25f) else Color.Transparent)
-                                .clickable { onPinToggle() },
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(StarkColors.DarkVoidOpaque)
+                                .border(1.dp, StarkColors.CyanDim, RoundedCornerShape(3.dp))
+                                .clickable { onZoomOut() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isPinned) Icons.Default.PushPin else Icons.Default.LocationOn,
-                                contentDescription = if (isPinned) "Pinned to Room" else "Pin to Room",
-                                tint = if (isPinned) StarkColors.Gold else StarkColors.TextMuted,
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Default.ZoomOut,
+                                contentDescription = "Zoom Out Widget",
+                                tint = StarkColors.Cyan,
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }
 
-                    if (onClose != null) {
-                        Spacer(modifier = Modifier.width(4.dp))
+                    // Zoom In Button
+                    if (onZoomIn != null && !isMinimized) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(StarkColors.DarkVoidOpaque)
+                                .border(1.dp, StarkColors.CyanDim, RoundedCornerShape(3.dp))
+                                .clickable { onZoomIn() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ZoomIn,
+                                contentDescription = "Zoom In Widget",
+                                tint = StarkColors.Cyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    // Relocate / Coordinate Jump
+                    if (onRelocate != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(StarkColors.DarkVoidOpaque)
+                                .border(1.dp, StarkColors.CyanDim, RoundedCornerShape(3.dp))
+                                .clickable { onRelocate() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocationSearching,
+                                contentDescription = "Relocate to Room Coordinate",
+                                tint = StarkColors.ElectricBlue,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    // Minimize / Maximize Button
+                    if (onMinimizeToggle != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(StarkColors.DarkVoidOpaque)
+                                .border(1.dp, StarkColors.CyanDim, RoundedCornerShape(3.dp))
+                                .clickable { onMinimizeToggle() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isMinimized) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                contentDescription = if (isMinimized) "Maximize Widget" else "Minimize Widget",
+                                tint = StarkColors.Cyan,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+
+                    // Pin / Fix in Room Button
+                    if (onPinToggle != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(if (isPinned) StarkColors.Cyan.copy(alpha = 0.35f) else StarkColors.DarkVoidOpaque)
+                                .border(1.dp, if (isPinned) StarkColors.Cyan else StarkColors.CyanDim, RoundedCornerShape(3.dp))
+                                .clickable { onPinToggle() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isPinned) Icons.Default.PushPin else Icons.Default.OpenWith,
+                                contentDescription = if (isPinned) "Fixed in Space" else "Freely Moving",
+                                tint = if (isPinned) StarkColors.Gold else StarkColors.TextMuted,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    // Close Button
+                    if (onClose != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(StarkColors.DarkVoidOpaque)
+                                .border(1.dp, StarkColors.CardBorder, RoundedCornerShape(3.dp))
                                 .clickable { onClose() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -190,27 +290,30 @@ fun StarkHolographicCard(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Dismiss Widget",
                                 tint = StarkColors.TextMuted,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            if (!isMinimized) {
+                Spacer(modifier = Modifier.height(10.dp))
 
-            // Thin holographic divider
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(StarkColors.CardBorder)
-            )
+                // Thin holographic divider
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(StarkColors.CardBorder)
+                )
 
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-            // Body Content
-            content()
+                // Body Content
+                content()
+            }
+
 
             Spacer(modifier = Modifier.height(10.dp))
 

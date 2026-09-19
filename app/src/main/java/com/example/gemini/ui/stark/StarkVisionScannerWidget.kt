@@ -44,7 +44,12 @@ import kotlin.math.sin
 @Composable
 fun StarkVisionScannerWidget(
     isPinned: Boolean = false,
+    isMinimized: Boolean = false,
     onPinToggle: (() -> Unit)? = null,
+    onMinimizeToggle: (() -> Unit)? = null,
+    onZoomIn: (() -> Unit)? = null,
+    onZoomOut: (() -> Unit)? = null,
+    onRelocate: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -75,10 +80,16 @@ fun StarkVisionScannerWidget(
         subtitle = StarkWidgetType.VISION_SCANNER.subtitle,
         tag = StarkWidgetType.VISION_SCANNER.tag,
         isPinned = isPinned,
+        isMinimized = isMinimized,
         onPinToggle = onPinToggle,
+        onMinimizeToggle = onMinimizeToggle,
+        onZoomIn = onZoomIn,
+        onZoomOut = onZoomOut,
+        onRelocate = onRelocate,
         onClose = onClose,
         modifier = modifier
     ) {
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,

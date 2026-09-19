@@ -35,7 +35,12 @@ import java.util.Locale
 @Composable
 fun StarkQuantumClockWidget(
     isPinned: Boolean = false,
+    isMinimized: Boolean = false,
     onPinToggle: (() -> Unit)? = null,
+    onMinimizeToggle: (() -> Unit)? = null,
+    onZoomIn: (() -> Unit)? = null,
+    onZoomOut: (() -> Unit)? = null,
+    onRelocate: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -57,10 +62,16 @@ fun StarkQuantumClockWidget(
         subtitle = StarkWidgetType.QUANTUM_ENVIRONMENT.subtitle,
         tag = StarkWidgetType.QUANTUM_ENVIRONMENT.tag,
         isPinned = isPinned,
+        isMinimized = isMinimized,
         onPinToggle = onPinToggle,
+        onMinimizeToggle = onMinimizeToggle,
+        onZoomIn = onZoomIn,
+        onZoomOut = onZoomOut,
+        onRelocate = onRelocate,
         onClose = onClose,
         modifier = modifier
     ) {
+
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)

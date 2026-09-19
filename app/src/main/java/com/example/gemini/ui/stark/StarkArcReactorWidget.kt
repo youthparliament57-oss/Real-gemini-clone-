@@ -46,7 +46,12 @@ import kotlin.math.sin
 @Composable
 fun StarkArcReactorWidget(
     isPinned: Boolean = false,
+    isMinimized: Boolean = false,
     onPinToggle: (() -> Unit)? = null,
+    onMinimizeToggle: (() -> Unit)? = null,
+    onZoomIn: (() -> Unit)? = null,
+    onZoomOut: (() -> Unit)? = null,
+    onRelocate: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -86,10 +91,16 @@ fun StarkArcReactorWidget(
         subtitle = StarkWidgetType.ARC_REACTOR.subtitle,
         tag = StarkWidgetType.ARC_REACTOR.tag,
         isPinned = isPinned,
+        isMinimized = isMinimized,
         onPinToggle = onPinToggle,
+        onMinimizeToggle = onMinimizeToggle,
+        onZoomIn = onZoomIn,
+        onZoomOut = onZoomOut,
+        onRelocate = onRelocate,
         onClose = onClose,
         modifier = modifier
     ) {
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,

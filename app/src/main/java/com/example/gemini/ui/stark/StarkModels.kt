@@ -43,3 +43,17 @@ data class StarkPlacedWidget(
     val distanceMeters: Float = 1.8f,
     val isPinned: Boolean = true
 )
+
+enum class RoomPresetCoordinate(
+    val label: String,
+    val description: String,
+    val defaultXOffset: Float,
+    val defaultYOffset: Float
+) {
+    NORTH_WALL("NORTH WALL", "Front central room anchor", 0.5f, 0.35f),
+    EAST_DESK("EAST DESK", "Right peripheral workstation", 0.85f, 0.55f),
+    WEST_LAB("WEST LAB", "Left telemetry terminal", 0.15f, 0.55f),
+    CEILING_GRID("CEILING MATRIX", "High angle aerial HUD", 0.5f, 0.15f),
+    FLOOR_CORE("REACTOR BASE", "Low center ground pedestal", 0.5f, 0.75f)
+}
+

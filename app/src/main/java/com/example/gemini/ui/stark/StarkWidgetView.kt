@@ -7,7 +7,12 @@ import androidx.compose.ui.Modifier
 fun StarkWidgetView(
     type: StarkWidgetType,
     isPinned: Boolean = false,
+    isMinimized: Boolean = false,
     onPinToggle: (() -> Unit)? = null,
+    onMinimizeToggle: (() -> Unit)? = null,
+    onZoomIn: (() -> Unit)? = null,
+    onZoomOut: (() -> Unit)? = null,
+    onRelocate: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -15,7 +20,12 @@ fun StarkWidgetView(
         StarkWidgetType.ARC_REACTOR -> {
             StarkArcReactorWidget(
                 isPinned = isPinned,
+                isMinimized = isMinimized,
                 onPinToggle = onPinToggle,
+                onMinimizeToggle = onMinimizeToggle,
+                onZoomIn = onZoomIn,
+                onZoomOut = onZoomOut,
+                onRelocate = onRelocate,
                 onClose = onClose,
                 modifier = modifier
             )
@@ -23,7 +33,12 @@ fun StarkWidgetView(
         StarkWidgetType.VISION_SCANNER -> {
             StarkVisionScannerWidget(
                 isPinned = isPinned,
+                isMinimized = isMinimized,
                 onPinToggle = onPinToggle,
+                onMinimizeToggle = onMinimizeToggle,
+                onZoomIn = onZoomIn,
+                onZoomOut = onZoomOut,
+                onRelocate = onRelocate,
                 onClose = onClose,
                 modifier = modifier
             )
@@ -31,7 +46,12 @@ fun StarkWidgetView(
         StarkWidgetType.MISSION_MATRIX -> {
             StarkMissionMatrixWidget(
                 isPinned = isPinned,
+                isMinimized = isMinimized,
                 onPinToggle = onPinToggle,
+                onMinimizeToggle = onMinimizeToggle,
+                onZoomIn = onZoomIn,
+                onZoomOut = onZoomOut,
+                onRelocate = onRelocate,
                 onClose = onClose,
                 modifier = modifier
             )
@@ -39,10 +59,16 @@ fun StarkWidgetView(
         StarkWidgetType.QUANTUM_ENVIRONMENT -> {
             StarkQuantumClockWidget(
                 isPinned = isPinned,
+                isMinimized = isMinimized,
                 onPinToggle = onPinToggle,
+                onMinimizeToggle = onMinimizeToggle,
+                onZoomIn = onZoomIn,
+                onZoomOut = onZoomOut,
+                onRelocate = onRelocate,
                 onClose = onClose,
                 modifier = modifier
             )
         }
     }
 }
+
