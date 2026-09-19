@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,11 +35,21 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.sin
 
 /**
- * Premium, voice-amplitude-reactive, double-layered Gemini Live Fluid Capsule.
- * Ensures perfectly circular bounding box ripple (0% square shadow) by delegating click to the rounded Surface:
- * - Beautiful outer glowing protective boundary overlay (slightly larger)
- * - Smaller high-resolution core interactive capsule
- * - Dynamic undulating multi-wave fluid whose height & speed are directly modulated by voice amplitude
+ * Model class for horizontal capsule stardust particles.
+ */
+private data class CapsuleParticle(
+    val xRatio: Float,
+    val yRatio: Float,
+    val speed: Float,
+    val size: Float,
+    val colorGroup: Int,
+    val amplitudeOffset: Float
+)
+
+/**
+ * Premium, voice-amplitude-reactive, particle-streamed Gemini Live Capsule.
+ * Houses 220 horizontal stardust particles flowing like a cosmic river, beautifully synchronized
+ * with real-time vocal amplitude dynamics.
  */
 @Composable
 fun GeminiLiveGlowingCapsule(
@@ -52,12 +63,12 @@ fun GeminiLiveGlowingCapsule(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "gemini_capsule_flux")
 
-    // Core wave phase animation
+    // Core particle flow progress animation
     val wavePhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * Math.PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isSpeaking) 1400 else 2800, easing = LinearEasing),
+            animation = tween(durationMillis = if (isSpeaking) 1500 else 3000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "capsule_wave_phase"
@@ -77,6 +88,28 @@ fun GeminiLiveGlowingCapsule(
     // Modulate liquid level directly with live amplitude for 100% natural responsiveness
     val liquidHeightRatio = (basePulseHeight + amplitude * 0.45f).coerceIn(0.15f, 0.95f)
 
+    // Generate 220 premium stardust stream coordinates
+    val totalParticles = 220
+    val particles = remember {
+        (0 until totalParticles).map { i ->
+            val xRatio = (i % 25) / 25f + (i * 0.007f) % 0.04f
+            val yRatio = 0.15f + (i % 11) * 0.07f // spread evenly across the vertical capsule space
+            val speed = 0.35f + (i % 5) * 0.15f
+            val size = 0.5f + (i % 4) * 0.45f
+            val colorGroup = i % 4
+            val amplitudeOffset = (i * 0.08f).toFloat()
+
+            CapsuleParticle(
+                xRatio = xRatio,
+                yRatio = yRatio,
+                speed = speed,
+                size = size,
+                colorGroup = colorGroup,
+                amplitudeOffset = amplitudeOffset
+            )
+        }
+    }
+
     Box(
         modifier = modifier
             .width(width)
@@ -85,30 +118,29 @@ fun GeminiLiveGlowingCapsule(
     ) {
         // 1. Slightly larger outer overlay shadow / glowing ring boundary
         Canvas(modifier = Modifier.size(width = width + 8.dp, height = height + 8.dp)) {
-            val cornerRadiusPx = (size.height / 2f)
             val glowRadius = size.width / 2f
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0x224285F4),
-                        Color(0x0D60A5FA),
+                        Color(0x2E4285F4),
+                        Color(0x0E60A5FA),
                         Color.Transparent
                     ),
-                    center = Offset(size.width / 2f, size.height * 0.65f),
+                    center = Offset(size.width / 2f, size.height * 0.5f),
                     radius = glowRadius
                 ),
                 radius = glowRadius,
-                center = Offset(size.width / 2f, size.height * 0.65f)
+                center = Offset(size.width / 2f, size.height * 0.5f)
             )
         }
 
-        // 2. Original inner button (made slightly smaller & elegant for perfect contrast)
+        // 2. High-Tech Particle Capsule surface
         Surface(
             onClick = { onClick?.invoke() },
             shape = CircleShape,
-            color = Color.White,
-            border = BorderStroke(1.2.dp, Color(0xFFE2E8F0)),
-            shadowElevation = 2.dp,
+            color = Color(0xFF0F172A), // Premium dark navy backdrop to let the stardust pop brilliantly
+            border = BorderStroke(1.2.dp, Color(0xFF334155)),
+            shadowElevation = 3.dp,
             modifier = Modifier
                 .width(width - 4.dp)
                 .height(height - 4.dp)
@@ -129,91 +161,82 @@ fun GeminiLiveGlowingCapsule(
                     }
 
                     clipPath(capsulePath) {
-                        // Background base layer
-                        drawRect(color = Color(0xFFFFFFFF))
+                        // Background gradient (Deep cosmic navy to dark slate)
+                        drawRect(
+                            brush = Brush.linearGradient(
+                                colors = listOf(Color(0xFF0F172A), Color(0xFF1E293B)),
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, size.height)
+                            )
+                        )
+
+                        // Ambient glowing celestial nebula core
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0x2A38BDF8),
+                                    Color(0x120284C7),
+                                    Color.Transparent
+                                ),
+                                center = Offset(size.width / 2f, size.height / 2f),
+                                radius = size.width * 0.65f
+                            ),
+                            radius = size.width * 0.65f,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
 
                         if (isActive) {
-                            // First wave layer (Slower, background)
-                            val wave1Path = Path().apply {
-                                val baseHeight = size.height * (1f - liquidHeightRatio)
-                                moveTo(0f, size.height)
-                                lineTo(0f, baseHeight)
+                            // Render flowing stardust stream
+                            particles.forEach { p ->
+                                // Horizontal motion phase calculation
+                                val currentXRatio = (p.xRatio + (wavePhase / (2 * Math.PI).toFloat()) * p.speed) % 1.0f
+                                val px = currentXRatio * size.width
 
-                                val steps = 24
-                                val stepWidth = size.width / steps
-                                for (i in 0..steps) {
-                                    val x = i * stepWidth
-                                    val normalizedX = x / size.width
-                                    // Make wave frequency and height responsive to speech
-                                    val speechMod = 1f + amplitude * 1.5f
-                                    val waveVal = sin(normalizedX * 2 * Math.PI + wavePhase * speechMod).toFloat() * (4f + amplitude * 6f)
-                                    lineTo(x, baseHeight + waveVal)
+                                // Dynamic vocal vertical wave modulation
+                                val waveFactor = sin(currentXRatio * 2.2 * Math.PI + wavePhase + p.amplitudeOffset).toFloat()
+                                // Vertical displacement increases with speech amplitude
+                                val maxDisplacement = 4.5f + amplitude * 14f
+                                val py = p.yRatio * size.height + waveFactor * maxDisplacement
+
+                                // Soft horizontal edge fade to prevent sharp clipping
+                                val edgeFade = (currentXRatio * (1f - currentXRatio) * 4f).coerceIn(0f, 1f)
+                                val baseAlpha = when (p.colorGroup) {
+                                    0 -> 0.90f  // Bright white
+                                    1 -> 0.78f  // Ice blue
+                                    2 -> 0.65f  // Cyan
+                                    else -> 0.45f // Sky blue
+                                }
+                                val finalAlpha = baseAlpha * edgeFade * (if (isSpeaking) 1.0f else 0.72f)
+
+                                val particleRadius = p.size.dp.toPx() * (0.8f + amplitude * 0.5f)
+                                val color = when (p.colorGroup) {
+                                    0 -> Color(0xFFFFFFFF).copy(alpha = finalAlpha)
+                                    1 -> Color(0xFFE0F2FE).copy(alpha = finalAlpha)
+                                    2 -> Color(0xFF38BDF8).copy(alpha = finalAlpha)
+                                    else -> Color(0xFF60A5FA).copy(alpha = finalAlpha)
                                 }
 
-                                lineTo(size.width, size.height)
-                                close()
+                                drawCircle(
+                                    color = color,
+                                    radius = particleRadius,
+                                    center = Offset(px, py)
+                                )
                             }
 
-                            drawPath(
-                                path = wave1Path,
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color(0x2260A5FA),
-                                        Color(0x6638BDF8),
-                                        Color(0xAA2563EB)
-                                    ),
-                                    startY = size.height * 0.25f,
-                                    endY = size.height
-                                )
-                            )
-
-                            // Second wave layer (Faster, dense foreground)
-                            val wave2Path = Path().apply {
-                                val baseHeight = size.height * (1f - liquidHeightRatio * 0.95f)
-                                moveTo(0f, size.height)
-                                lineTo(0f, baseHeight)
-
-                                val steps = 24
-                                val stepWidth = size.width / steps
-                                for (i in 0..steps) {
-                                    val x = i * stepWidth
-                                    val normalizedX = x / size.width
-                                    val speechMod = 1.3f + amplitude * 2.0f
-                                    val waveVal = sin(normalizedX * 3.5 * Math.PI - wavePhase * speechMod).toFloat() * (3f + amplitude * 5f)
-                                    lineTo(x, baseHeight + waveVal)
-                                }
-
-                                lineTo(size.width, size.height)
-                                close()
-                            }
-
-                            drawPath(
-                                path = wave2Path,
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color(0x0038BDF8),
-                                        Color(0x8838BDF8),
-                                        Color(0xDD2563EB),
-                                        Color(0xFF1D4ED8)
-                                    ),
-                                    startY = size.height * 0.35f,
-                                    endY = size.height
-                                )
-                            )
-
-                            // Premium inner highlight glow core
+                            // Vocal energy hot spot / highlight glow at the center
+                            val coreGlowAlpha = (0.28f + amplitude * 0.45f).coerceIn(0.1f, 0.85f)
                             drawCircle(
                                 brush = Brush.radialGradient(
                                     colors = listOf(
-                                        Color(0xFFBAE6FD).copy(alpha = 0.9f),
-                                        Color(0xFF60A5FA).copy(alpha = 0.6f),
+                                        Color(0xFFE0F2FE).copy(alpha = coreGlowAlpha * 0.8f),
+                                        Color(0xFF0284C7).copy(alpha = coreGlowAlpha * 0.3f),
                                         Color.Transparent
                                     ),
-                                    center = Offset(size.width / 2f + sin(wavePhase) * 8f, size.height * 0.82f),
-                                    radius = size.width * 0.42f
+                                    center = Offset(size.width / 2f, size.height / 2f),
+                                    radius = size.width * 0.38f
                                 ),
-                                center = Offset(size.width / 2f + sin(wavePhase) * 8f, size.height * 0.82f),
-                                radius = size.width * 0.42f
+                                radius = size.width * 0.38f,
+                                center = Offset(size.width / 2f, size.height / 2f)
                             )
                         }
                     }

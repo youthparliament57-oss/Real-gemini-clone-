@@ -58,6 +58,8 @@ fun GeminiLiveOrb(
     isActive: Boolean = true,
     isSpeaking: Boolean = false,
     amplitude: Float = 0f, // real-time voice amplitude (0f to 1f)
+    particleCount: Int = 600,
+    baseParticleSizeMultiplier: Float = 1.0f,
     onClick: (() -> Unit)? = null
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "gemini_orb_stardust")
@@ -95,12 +97,11 @@ fun GeminiLiveOrb(
         label = "orb_turbulence"
     )
 
-    // Golden ratio spherical particle generation (600 premium stardust coordinates)
-    val totalParticles = 600
-    val particles = remember {
-        (0 until totalParticles).map { i ->
+    // Golden ratio spherical particle generation (premium stardust coordinates)
+    val particles = remember(particleCount) {
+        (0 until particleCount).map { i ->
             val theta = (i * 137.5) * (Math.PI / 180.0) // Golden angle distribution
-            val y = 1.0 - (i / (totalParticles - 1).toDouble()) * 2.0 // Y-axis projection
+            val y = 1.0 - (i / (particleCount - 1).toDouble()) * 2.0 // Y-axis projection
             val radiusAtY = sqrt((1.0 - y * y).coerceAtLeast(0.0))
             val x = cos(theta) * radiusAtY
             val z = sin(theta) * radiusAtY
@@ -201,7 +202,7 @@ fun GeminiLiveOrb(
                 val screenY = center.y + ry * baseRadius * distanceMultiplier
 
                 // Dynamic particle radius and transparency depending on depth (3D Occlusion)
-                val particleRadius = (p.baseSize.dp.toPx() * (0.4f + depth * 1.2f))
+                val particleRadius = (p.baseSize.dp.toPx() * (0.4f + depth * 1.2f) * baseParticleSizeMultiplier)
                 val baseAlpha = when (p.colorGroup) {
                     0 -> 0.85f  // Bright white
                     1 -> 0.70f  // Cyan

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -31,6 +32,9 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.gemini.data.remote.GeminiService
 import com.example.gemini.ui.components.GeminiLiveOrb
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.*
 import java.util.Locale
 import kotlin.math.sin
@@ -209,25 +213,46 @@ class GeminiOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
     private fun createOverlayView() {
         overlayView = ComposeView(this).apply {
             setContent {
-                Box(modifier = Modifier.size(200.dp)) {
-                    val active by isListening
-                    val speaking by isSpeaking
-                    val amplitude by speechAmplitude
+                val active by isListening
+                val speaking by isSpeaking
+                val amplitude by speechAmplitude
 
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    this@GeminiOverlayService.layoutParams?.let { params ->
+                                        params.x = params.x + dragAmount.x.toInt()
+                                        params.y = params.y + dragAmount.y.toInt()
+                                        windowManager.updateViewLayout(overlayView, params)
+                                    }
+                                }
+                            )
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures {
+                                if (active) {
+                                    speechRecognizer?.stopListening()
+                                    isListening.value = false
+                                    speechAmplitude.value = 0f
+                                } else {
+                                    startListening()
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
                     GeminiLiveOrb(
-                        size = 180.dp,
+                        size = 90.dp,
                         isActive = true,
                         isSpeaking = active || speaking,
                         amplitude = amplitude,
-                        onClick = {
-                            if (active) {
-                                speechRecognizer?.stopListening()
-                                isListening.value = false
-                                speechAmplitude.value = 0f
-                            } else {
-                                startListening()
-                            }
-                        }
+                        particleCount = 1000,
+                        baseParticleSizeMultiplier = 0.45f,
+                        onClick = null // No internal clickable modifier is applied, completely removing any background ripples or button boxes!
                     )
                 }
             }
@@ -247,56 +272,18 @@ class GeminiOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
         }
 
         layoutParams = WindowManager.LayoutParams(
-            220.dp.toPx(this),
-            220.dp.toPx(this),
+            110.dp.toPx(this),
+            110.dp.toPx(this),
             layoutFlag,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            x = 40
-            y = 120
+            gravity = Gravity.TOP or Gravity.START
+            // Position on right-middle of screen initially
+            val displayMetrics = resources.displayMetrics
+            x = displayMetrics.widthPixels - 120.dp.toPx(this@GeminiOverlayService)
+            y = displayMetrics.heightPixels / 2 - 55.dp.toPx(this@GeminiOverlayService)
         }
-
-        // Add dynamic drag gesture tracking to easily float the Live Orb
-        overlayView!!.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX = 0
-            private var initialY = 0
-            private var initialTouchX = 0f
-            private var initialTouchY = 0f
-            private var isDragging = false
-
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialX = layoutParams!!.x
-                        initialY = layoutParams!!.y
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
-                        isDragging = false
-                        return false // Let click listener receive event
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - initialTouchX).toInt()
-                        val dy = (event.rawY - initialTouchY).toInt()
-                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-                            isDragging = true
-                        }
-                        if (isDragging) {
-                            // Update position (inverted Y since gravity is bottom-end)
-                            layoutParams!!.x = initialX - dx
-                            layoutParams!!.y = initialY - dy
-                            windowManager.updateViewLayout(overlayView, layoutParams)
-                        }
-                        return true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        return isDragging
-                    }
-                }
-                return false
-            }
-        })
 
         windowManager.addView(overlayView, layoutParams)
     }
