@@ -71,6 +71,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -134,6 +135,8 @@ fun GeminiLiveDialog(
     var transcriptHistory by remember { mutableStateOf(listOf<LiveTranscriptItem>()) }
     val listState = rememberLazyListState()
 
+    var isLiveWebSocketMode by remember { mutableStateOf(false) }
+
     // Speech & Audio Engine references
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
@@ -188,6 +191,7 @@ fun GeminiLiveDialog(
 
     fun startListening() {
         if (isMuted || isSpeaking || isThinking) return
+        liveSpokenText = ""
         try {
             // Clean up any existing recognizer first to prevent locking up the microphone!
             speechRecognizer?.let {
@@ -219,7 +223,22 @@ fun GeminiLiveDialog(
                         isListening = false
                     }
                     override fun onError(error: Int) {
+                        android.util.Log.e("GeminiLiveDialog", "SpeechRecognizer error: $error")
                         isListening = false
+                        
+                        // Automatically restart listening for common transient errors to keep assistant active!
+                        if (!isMuted && !isSpeaking && !isThinking && !isLiveWebSocketMode) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                try {
+                                    if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                                        speechRecognizer?.cancel()
+                                    }
+                                    startListening()
+                                } catch (e: Exception) {
+                                    android.util.Log.e("GeminiLiveDialog", "Error auto-restarting STT: ${e.message}")
+                                }
+                            }, 400)
+                        }
                     }
                     override fun onResults(results: Bundle?) {
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -431,7 +450,11 @@ fun GeminiLiveDialog(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startRealLiveSession()
+            if (isLiveWebSocketMode) {
+                startRealLiveSession()
+            } else {
+                startListening()
+            }
         } else {
             Toast.makeText(context, "Microphone permission is required for Gemini Live to listen to your voice.", Toast.LENGTH_SHORT).show()
         }
@@ -521,7 +544,11 @@ fun GeminiLiveDialog(
             android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (hasMic) {
-            startRealLiveSession()
+            if (isLiveWebSocketMode) {
+                startRealLiveSession()
+            } else {
+                startListening()
+            }
         } else {
             recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
@@ -616,6 +643,72 @@ fun GeminiLiveDialog(
                                 tint = if (isCameraActive) Color.White else Color(0xFF1F1F1F),
                                 modifier = Modifier.size(24.dp)
                             )
+                        }
+
+                        // Center: Segmented Toggle for STT vs Live Mode
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (isCameraActive) Color(0x33FFFFFF) else Color(0xFFF1F3F4))
+                                .padding(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (!isLiveWebSocketMode) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                    .clickable {
+                                        if (isLiveWebSocketMode) {
+                                            isLiveWebSocketMode = false
+                                            
+                                            // Close WebSocket
+                                            isWebSocketConnected = false
+                                            recordingJob?.cancel()
+                                            webSocketClient.close()
+                                            try { audioRecord?.stop(); audioRecord?.release() } catch (e: Exception) {}
+                                            audioRecord = null
+                                            try { audioTrack?.stop(); audioTrack?.release() } catch (e: Exception) {}
+                                            audioTrack = null
+                                            
+                                            // Start Listening via STT
+                                            startListening()
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "🎙️ STT Mode",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (!isLiveWebSocketMode) Color.White else (if (isCameraActive) Color.White else Color(0xFF444746))
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isLiveWebSocketMode) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                    .clickable {
+                                        if (!isLiveWebSocketMode) {
+                                            isLiveWebSocketMode = true
+                                            
+                                            // Stop STT
+                                            speechRecognizer?.stopListening()
+                                            speechRecognizer?.destroy()
+                                            speechRecognizer = null
+                                            
+                                            // Start WebSocket Live Mode
+                                            startRealLiveSession()
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "🚀 Live Stream",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isLiveWebSocketMode) Color.White else (if (isCameraActive) Color.White else Color(0xFF444746))
+                                )
+                            }
                         }
 
                         // Right action items
@@ -918,6 +1011,48 @@ fun GeminiLiveDialog(
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // Real-time Subtitle / Live Speech Bubble (Shows exact words as they are spoken)
+                    AnimatedVisibility(
+                        visible = isListening && !isLiveWebSocketMode && !isMuted,
+                        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+                        exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isCameraActive) Color(0x99000000) else Color(0xFFF1F3F4),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isCameraActive) Color(0x33FFFFFF) else Color(0xFFE2E8F0)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Microphone",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = if (liveSpokenText.isBlank()) "Listening... Speak now" else liveSpokenText,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (liveSpokenText.isBlank()) {
+                                        if (isCameraActive) Color(0xAAFFFFFF) else Color(0xFF747775)
+                                    } else {
+                                        if (isCameraActive) Color.White else Color(0xFF1F1F1F)
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }
