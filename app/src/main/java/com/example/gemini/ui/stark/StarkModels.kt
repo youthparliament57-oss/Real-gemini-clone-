@@ -47,13 +47,12 @@ data class StarkPlacedWidget(
 enum class RoomPresetCoordinate(
     val label: String,
     val description: String,
-    val defaultXOffset: Float,
-    val defaultYOffset: Float
+    val worldVector: Vector3D
 ) {
-    NORTH_WALL("NORTH WALL", "Front central room anchor", 0.5f, 0.35f),
-    EAST_DESK("EAST DESK", "Right peripheral workstation", 0.85f, 0.55f),
-    WEST_LAB("WEST LAB", "Left telemetry terminal", 0.15f, 0.55f),
-    CEILING_GRID("CEILING MATRIX", "High angle aerial HUD", 0.5f, 0.15f),
-    FLOOR_CORE("REACTOR BASE", "Low center ground pedestal", 0.5f, 0.75f)
+    NORTH_WALL("FRONT SECTOR", "Central front anchor (Z +2.0m)", Vector3D(0.0f, 0.2f, 2.0f)),
+    EAST_DESK("EAST PERIMETER", "Right wing 3D anchor (X +1.8m, Z +1.2m)", Vector3D(1.8f, -0.1f, 1.2f)),
+    WEST_LAB("WEST TERMINAL", "Left wing 3D anchor (X -1.8m, Z +1.2m)", Vector3D(-1.8f, -0.1f, 1.2f)),
+    CEILING_GRID("AERIAL MATRIX", "High ceiling overhead (Y +1.5m, Z +1.0m)", Vector3D(0.0f, 1.5f, 1.0f)),
+    FLOOR_CORE("PEDESTAL BASE", "Lower ground core (Y -1.0m, Z +1.5f)", Vector3D(0.0f, -1.0f, 1.5f))
 }
 
