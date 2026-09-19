@@ -136,6 +136,7 @@ fun GeminiLiveDialog(
     val listState = rememberLazyListState()
 
     var isLiveWebSocketMode by remember { mutableStateOf(false) }
+    var getLatestCameraBitmap by remember { mutableStateOf<(() -> android.graphics.Bitmap?)?>(null) }
 
     // Speech & Audio Engine references
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
@@ -153,17 +154,18 @@ fun GeminiLiveDialog(
         ttsEngine?.setPitch(voice.pitch)
         ttsEngine?.setSpeechRate(voice.speechRate)
         
-        // Auto-detect language
+        // Auto-detect language (defaulting English text to US for high quality synthesis)
         val isHindi = text.any { it in '\u0900'..'\u097F' }
-        val targetLocale = if (isHindi) Locale("hi", "IN") else Locale.getDefault()
-
+        val targetLocale = if (isHindi) Locale("hi", "IN") else Locale.US
+ 
         // Match the selected voice characteristics with Google's high quality neural voices
         try {
             ttsEngine?.language = targetLocale
             val systemVoices = ttsEngine?.voices
             if (!systemVoices.isNullOrEmpty()) {
                 val matchedSystemVoice = systemVoices.filter { v ->
-                    v.locale.language == targetLocale.language
+                    v.locale.language == targetLocale.language &&
+                    !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
                 }.maxByOrNull { v ->
                     var score = 0
                     val name = v.name.lowercase()
@@ -182,7 +184,10 @@ fun GeminiLiveDialog(
                 }
             }
         } catch (e: Exception) {
-            // Fallback gracefully
+            // Fallback gracefully to default system speech characteristics
+            try {
+                ttsEngine?.language = targetLocale
+            } catch (ignored: Exception) {}
         }
         
         ttsEngine?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "gemini_live_tts")
@@ -262,9 +267,11 @@ fun GeminiLiveDialog(
                                 }
                                 val prefs = context.getSharedPreferences("gemini_prefs", android.content.Context.MODE_PRIVATE)
                                 val savedKey = prefs.getString("custom_api_key", "") ?: ""
+                                val currentBitmap = if (isCameraActive) getLatestCameraBitmap?.invoke() else null
                                 val result = geminiService.generateContent(
                                     messages = mappedContext,
                                     newPrompt = text,
+                                    bitmap = currentBitmap,
                                     model = currentModel,
                                     customApiKey = savedKey
                                 )
@@ -483,9 +490,13 @@ fun GeminiLiveDialog(
         var tts: TextToSpeech? = null
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
-                // Auto-choose premium network voice if available
-                tts?.voices?.find { v -> v.name.lowercase().contains("en-us") && v.name.lowercase().contains("network") }?.let {
+                tts?.language = Locale.US
+                // Auto-choose premium network voice if available and installed
+                tts?.voices?.find { v -> 
+                    v.name.lowercase().contains("en-us") && 
+                    (v.name.lowercase().contains("network") || v.name.lowercase().contains("neural") || v.name.lowercase().contains("wavenet")) &&
+                    !v.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+                }?.let {
                     tts?.voice = it
                 }
                 
@@ -607,6 +618,9 @@ fun GeminiLiveDialog(
                 if (isCameraActive) {
                     GeminiLiveCameraView(
                         isFrontCamera = isFrontCamera,
+                        onPreviewReady = { getBitmap ->
+                            getLatestCameraBitmap = getBitmap
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

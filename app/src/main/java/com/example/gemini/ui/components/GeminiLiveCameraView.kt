@@ -28,6 +28,7 @@ import androidx.core.content.ContextCompat
 @Composable
 fun GeminiLiveCameraView(
     isFrontCamera: Boolean,
+    onPreviewReady: (() -> android.graphics.Bitmap?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -38,6 +39,16 @@ fun GeminiLiveCameraView(
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
+    }
+
+    LaunchedEffect(previewView) {
+        onPreviewReady {
+            try {
+                previewView.bitmap
+            } catch (e: Exception) {
+                null
+            }
         }
     }
 
