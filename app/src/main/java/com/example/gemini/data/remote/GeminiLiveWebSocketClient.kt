@@ -24,6 +24,7 @@ class GeminiLiveWebSocketClient {
         onAudioDataReceived: (ByteArray) -> Unit,
         onTextReceived: (String) -> Unit,
         onSessionConfigured: () -> Unit,
+        onTurnComplete: (Boolean) -> Unit,
         onError: (Throwable) -> Unit
     ) {
         // Construct the correct secure WebSockets URL for the Gemini Live API
@@ -76,8 +77,14 @@ class GeminiLiveWebSocketClient {
                     // Parse serverContent for audio chunks and textual transcription
                     val serverContent = json.optJSONObject("serverContent")
                     if (serverContent != null) {
+                        val turnComplete = serverContent.optBoolean("turnComplete", false)
+                        if (turnComplete) {
+                            onTurnComplete(true)
+                        }
+
                         val modelTurn = serverContent.optJSONObject("modelTurn")
                         if (modelTurn != null) {
+                            onTurnComplete(false) // Server started speaking/sending new content
                             val parts = modelTurn.optJSONArray("parts")
                             if (parts != null) {
                                 for (i in 0 until parts.length()) {

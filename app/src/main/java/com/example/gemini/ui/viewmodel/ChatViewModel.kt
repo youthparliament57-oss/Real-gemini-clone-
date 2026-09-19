@@ -262,8 +262,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 // Save AI message to database
-                val responseText = result.getOrElse {
-                    "Unable to get response from Gemini. Please check your network connection or API key."
+                val responseText = result.getOrElse { t ->
+                    t.localizedMessage ?: "Unable to get response from Gemini. Please check your network connection or API key."
                 }
                 repository.saveAiResponse(sessionId, responseText)
             } catch (e: Exception) {
@@ -329,6 +329,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             textToSpeech?.stop()
             _currentlySpeakingMessageId.value = messageId
+
+            // Auto-detect language
+            val isHindi = text.any { it in '\u0900'..'\u097F' }
+            val targetLocale = if (isHindi) Locale("hi", "IN") else Locale("en", "IN")
+
+            try {
+                textToSpeech?.language = targetLocale
+                val availableVoices = textToSpeech?.voices
+                if (!availableVoices.isNullOrEmpty()) {
+                    val bestVoice = availableVoices.filter { voice ->
+                        voice.locale.language == targetLocale.language
+                    }.maxByOrNull { voice ->
+                        var score = 0
+                        val name = voice.name.lowercase()
+                        if (name.contains("neural") || name.contains("wavenet") || name.contains("network")) score += 10
+                        if (voice.features.contains("neural") || voice.features.contains("wavenet")) score += 5
+                        if (voice.quality >= 400) score += 3
+                        score
+                    }
+                    bestVoice?.let {
+                        textToSpeech?.voice = it
+                    }
+                }
+            } catch (e: Exception) {
+                // Fallback gracefully
+            }
+
             textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, messageId)
         }
     }

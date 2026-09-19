@@ -8,10 +8,10 @@ enum class GeminiModel(
     val description: String,
     val badge: String = "Fast"
 ) {
-    FLASH_EXTENDED("Flash Extended", "gemini-3.5-flash", "Fast & versatile for most tasks", "Recommended"),
-    FLASH_LITE("Flash Lite", "gemini-3.1-flash-lite-preview", "Lightweight, ultra-fast responses", "Fast"),
-    PRO("Gemini 3.1 Pro", "gemini-3.1-pro-preview", "Advanced reasoning, coding and analysis", "Thinking"),
-    LIVE("Gemini 3.8 Live", "gemini-3.8-live", "Real-time Live API for voice conversations", "Live")
+    FLASH_EXTENDED("Gemini 2.5 Flash", "gemini-2.5-flash", "Fast & versatile for most tasks", "Recommended"),
+    FLASH_LITE("Gemini 2.5 Lite", "gemini-2.5-flash", "Lightweight, ultra-fast responses", "Fast"),
+    PRO("Gemini 2.5 Pro", "gemini-2.5-pro", "Advanced reasoning, coding and analysis", "Thinking"),
+    LIVE("Gemini 2.5 Live", "gemini-2.5-flash", "Real-time Live API for voice conversations", "Live")
 }
 
 enum class ChatbotRole(

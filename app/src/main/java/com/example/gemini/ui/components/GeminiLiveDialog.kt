@@ -150,13 +150,17 @@ fun GeminiLiveDialog(
         ttsEngine?.setPitch(voice.pitch)
         ttsEngine?.setSpeechRate(voice.speechRate)
         
+        // Auto-detect language
+        val isHindi = text.any { it in '\u0900'..'\u097F' }
+        val targetLocale = if (isHindi) Locale("hi", "IN") else Locale.getDefault()
+
         // Match the selected voice characteristics with Google's high quality neural voices
         try {
+            ttsEngine?.language = targetLocale
             val systemVoices = ttsEngine?.voices
             if (!systemVoices.isNullOrEmpty()) {
-                val defaultLocale = Locale.getDefault()
                 val matchedSystemVoice = systemVoices.filter { v ->
-                    v.locale.language == defaultLocale.language
+                    v.locale.language == targetLocale.language
                 }.maxByOrNull { v ->
                     var score = 0
                     val name = v.name.lowercase()
@@ -366,12 +370,15 @@ fun GeminiLiveDialog(
                             while (isWebSocketConnected) {
                                 val read = recorder.read(buffer, 0, buffer.size)
                                 if (read > 0) {
-                                    val chunk = buffer.copyOf(read)
-                                    webSocketClient.sendAudioChunk(chunk)
+                                    // Block transmission when Gemini is speaking or thinking to prevent feedback and echo
+                                    if (!isSpeaking && !isThinking) {
+                                        val chunk = buffer.copyOf(read)
+                                        webSocketClient.sendAudioChunk(chunk)
+                                    }
 
                                     var sum = 0f
                                     for (i in 0 until read step 2) {
-                                        val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 0xFF)).toShort()
+                                        val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)).toShort()
                                         sum += Math.abs(sample.toFloat())
                                     }
                                     val rms = sum / (read / 2)
@@ -384,6 +391,17 @@ fun GeminiLiveDialog(
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("GeminiLiveDialog", "Recording error: ${e.message}")
+                    }
+                }
+            },
+            onTurnComplete = { finished ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (finished) {
+                        isSpeaking = false
+                        isListening = true
+                    } else {
+                        isSpeaking = true
+                        isListening = false
                     }
                 }
             },

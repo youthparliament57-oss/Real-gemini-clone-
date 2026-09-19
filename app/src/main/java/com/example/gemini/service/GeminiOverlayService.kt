@@ -223,6 +223,33 @@ class GeminiOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
 
     private fun speakText(text: String) {
         ttsEngine?.stop()
+
+        // Auto-detect language
+        val isHindi = text.any { it in '\u0900'..'\u097F' }
+        val targetLocale = if (isHindi) Locale("hi", "IN") else Locale("en", "IN")
+
+        try {
+            ttsEngine?.language = targetLocale
+            val availableVoices = ttsEngine?.voices
+            if (!availableVoices.isNullOrEmpty()) {
+                val bestVoice = availableVoices.filter { voice ->
+                    voice.locale.language == targetLocale.language
+                }.maxByOrNull { voice ->
+                    var score = 0
+                    val name = voice.name.lowercase()
+                    if (name.contains("neural") || name.contains("wavenet") || name.contains("network")) score += 10
+                    if (voice.features.contains("neural") || voice.features.contains("wavenet")) score += 5
+                    if (voice.quality >= 400) score += 3
+                    score
+                }
+                bestVoice?.let {
+                    ttsEngine?.voice = it
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback gracefully
+        }
+
         val params = Bundle().apply {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "live_speech")
         }
