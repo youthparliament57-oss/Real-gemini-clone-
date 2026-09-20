@@ -87,14 +87,17 @@ class ArCameraRenderer(
         .asFloatBuffer()
 
     var displayRotation: Int = 0
+    private var lastLogTime = 0L
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        Log.d(TAG, "onSurfaceCreated: GLSurfaceView surface created successfully.")
         GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f)
 
         // Generate OpenGL external texture
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         textureId = textures[0]
+        Log.d(TAG, "onSurfaceCreated: Generated external OES texture with ID: $textureId")
 
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
@@ -103,6 +106,7 @@ class ArCameraRenderer(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
         // Bind texture ID to ARCore session
+        Log.d(TAG, "onSurfaceCreated: Binding texture ID $textureId to ARCore session.")
         sessionManager.setCameraTextureNames(intArrayOf(textureId))
 
         // Compile and link shaders
@@ -122,6 +126,7 @@ class ArCameraRenderer(
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        Log.d(TAG, "onSurfaceChanged: Viewport width = $width, height = $height, displayRotation = $displayRotation")
         GLES20.glViewport(0, 0, width, height)
         sessionManager.setDisplayGeometry(displayRotation, width, height)
     }
@@ -129,11 +134,23 @@ class ArCameraRenderer(
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
-        val frame = sessionManager.updateFrame() ?: return
+        val frame = sessionManager.updateFrame()
+        val currentTime = System.currentTimeMillis()
+        val shouldLog = currentTime - lastLogTime > 3000
+        if (shouldLog) {
+            lastLogTime = currentTime
+            Log.d(TAG, "onDrawFrame: Frame update success = ${frame != null}, SessionState = ${sessionManager.state.value}")
+            val glErr = GLES20.glGetError()
+            if (glErr != GLES20.GL_NO_ERROR) {
+                Log.e(TAG, "onDrawFrame: OpenGL error detected = $glErr")
+            }
+        }
+
+        if (frame == null) return
 
         // Compute UV transform matching the device display orientation and aspect ratio
         frame.transformCoordinates2d(
-            Coordinates2d.VIEW,
+            Coordinates2d.VIEW_NORMALIZED,
             quadViewCoords,
             Coordinates2d.TEXTURE_NORMALIZED,
             quadTexCoords
