@@ -300,7 +300,8 @@ fun ArCalibrationOverlay(
                                     onCaptureManualCorner(point)
                                     hitTestError = null
                                 } else {
-                                    hitTestError = "Aim failure: Center reticle directly on a tracked floor surface."
+                                    val diag = sessionManager.lastHitTestDiagnostic.value
+                                    hitTestError = "Aim failure: ${diag?.rejectionReason ?: "Center reticle directly on a tracked floor surface."}"
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),

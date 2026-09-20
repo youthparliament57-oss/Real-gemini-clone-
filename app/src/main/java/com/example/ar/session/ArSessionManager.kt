@@ -4,13 +4,16 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
-import com.example.ar.capability.ArCapabilityChecker
+import com.example.ar.analysis.model.SpatialPoint2D
 import com.example.ar.analysis.model.SpatialVector3
+import com.example.ar.capability.ArCapabilityChecker
 import com.google.ar.core.CameraConfig
 import com.google.ar.core.CameraConfigFilter
 import com.google.ar.core.Config
+import com.google.ar.core.DepthPoint
 import com.google.ar.core.Frame
 import com.google.ar.core.Plane
+import com.google.ar.core.Point
 import com.google.ar.core.Pose
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingFailureReason
@@ -23,6 +26,27 @@ import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.sqrt
+
+/**
+ * Detailed diagnostic model for AR floor hit-testing and corner calibration.
+ */
+data class HitTestDiagnostic(
+    val trackedHorizontalPlanesCount: Int = 0,
+    val selectedFloorPlaneId: String? = null,
+    val floorPlaneTrackingState: String? = null,
+    val floorPolygonVertexCount: Int = 0,
+    val floorElevationY: Float? = null,
+    val totalHitResultsCount: Int = 0,
+    val hitTrackableTypes: List<String> = emptyList(),
+    val hitPoses: List<SpatialVector3> = emptyList(),
+    val resolutionMethod: String? = null,
+    val rejectionReason: String? = null,
+    val finalPoint: SpatialVector3? = null,
+    val timestampMs: Long = System.currentTimeMillis()
+)
 
 /**
  * Manages the ARCore Session lifecycle, hardware camera ownership, and configuration.
@@ -39,9 +63,16 @@ class ArSessionManager(
     private var isDepthSupported: Boolean = false
     private var latestCameraPose: Pose? = null
     private var latestFrame: Frame? = null
+    var viewportWidth: Int = 0
+        private set
+    var viewportHeight: Int = 0
+        private set
 
     private val _state = MutableStateFlow<ArRuntimeState>(ArRuntimeState.Ready)
     val state: StateFlow<ArRuntimeState> = _state.asStateFlow()
+
+    private val _lastHitTestDiagnostic = MutableStateFlow<HitTestDiagnostic?>(null)
+    val lastHitTestDiagnostic: StateFlow<HitTestDiagnostic?> = _lastHitTestDiagnostic.asStateFlow()
 
     fun getSession(): Session? = session
 
@@ -167,6 +198,8 @@ class ArSessionManager(
      * Sets display geometry for the ARCore session on view resize or orientation change.
      */
     fun setDisplayGeometry(rotation: Int, width: Int, height: Int) {
+        this.viewportWidth = width
+        this.viewportHeight = height
         try {
             session?.setDisplayGeometry(rotation, width, height)
         } catch (e: Exception) {
@@ -286,27 +319,304 @@ class ArSessionManager(
     }
 
     /**
-     * Performs a hit test on the active session at screen pixel coordinates (xPx, yPx).
-     * Filters for horizontal, upward-facing planes (valid floor surfaces) and returns the 3D position in World Space.
+     * Performs a multi-stage, robust hit test on the active ARCore session at screen pixel coordinates (xPx, yPx).
+     *
+     * Pipeline evaluation stages:
+     * 1. Validate ARCore frame, camera tracking state, and detected horizontal floor planes.
+     * 2. Identify the primary floor plane elevation baseline.
+     * 3. Evaluate direct horizontal plane polygon hit results.
+     * 4. Evaluate ARCore depth sensor / point hit results on the floor plane surface with upward normal checks.
+     * 5. Evaluate vertical wall hits near the baseboard (within 35cm of floor level) and project down to floor level.
+     * 6. Perform geometric ray-plane projection from camera pose to tracked floor elevation for corners outside polygon bounds.
+     * 7. Reject invalid hits (high walls, upward-facing rays, points too far from tracked bounds).
+     *
+     * Detailed diagnostics are recorded in `lastHitTestDiagnostic` and logged to Logcat.
      */
     fun hitTestFloor(xPx: Float, yPx: Float): SpatialVector3? {
-        val currentFrame = latestFrame ?: return null
-        return try {
-            val hits = currentFrame.hitTest(xPx, yPx)
-            for (i in 0 until hits.size) {
-                val hit = hits[i]
-                val trackable = hit.trackable
-                if (trackable is Plane) {
-                    if (trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING) {
-                        val pose = hit.hitPose
-                        return SpatialVector3(pose.tx(), pose.ty(), pose.tz())
+        val currentFrame = latestFrame ?: run {
+            val diag = HitTestDiagnostic(
+                rejectionReason = "ARCore camera frame is not available."
+            )
+            _lastHitTestDiagnostic.value = diag
+            Log.w(TAG, "hitTestFloor rejected: ${diag.rejectionReason}")
+            return null
+        }
+
+        val camera = currentFrame.camera
+        if (camera.trackingState != TrackingState.TRACKING) {
+            val diag = HitTestDiagnostic(
+                rejectionReason = "ARCore tracking is currently ${camera.trackingState.name}. Hold device steady."
+            )
+            _lastHitTestDiagnostic.value = diag
+            Log.w(TAG, "hitTestFloor rejected: ${diag.rejectionReason}")
+            return null
+        }
+
+        // 1. Gather all tracked horizontal upward-facing planes
+        val allPlanes = getDetectedPlanes()
+        val trackedHorizontalPlanes = allPlanes.filter {
+            it.type == Plane.Type.HORIZONTAL_UPWARD_FACING && it.trackingState == TrackingState.TRACKING
+        }
+
+        val trackedCount = trackedHorizontalPlanes.size
+        if (trackedCount == 0) {
+            val diag = HitTestDiagnostic(
+                trackedHorizontalPlanesCount = 0,
+                totalHitResultsCount = 0,
+                rejectionReason = "No horizontal floor surfaces are currently tracked. Pan camera over floor."
+            )
+            _lastHitTestDiagnostic.value = diag
+            Log.w(TAG, "hitTestFloor rejected: ${diag.rejectionReason}")
+            return null
+        }
+
+        // 2. Select the primary floor plane (lowest horizontal plane below camera or lowest detected plane)
+        val cameraPose = camera.displayOrientedPose ?: camera.pose
+        val camPos = SpatialVector3(cameraPose.tx(), cameraPose.ty(), cameraPose.tz())
+        val selectedFloorPlane = run {
+            val beneathCam = trackedHorizontalPlanes.filter { it.centerPose.ty() < camPos.y - 0.2f }
+            if (beneathCam.isNotEmpty()) {
+                beneathCam.minByOrNull { it.centerPose.ty() }!!
+            } else {
+                trackedHorizontalPlanes.minByOrNull { it.centerPose.ty() }!!
+            }
+        }
+
+        val floorY = selectedFloorPlane.centerPose.ty()
+        val floorPlaneId = "plane_${selectedFloorPlane.hashCode()}"
+        val floorTrackingState = selectedFloorPlane.trackingState.name
+        val floorPolygonVertexCount = selectedFloorPlane.polygon.limit() / 2
+        val floorCenter = SpatialVector3(
+            selectedFloorPlane.centerPose.tx(),
+            selectedFloorPlane.centerPose.ty(),
+            selectedFloorPlane.centerPose.tz()
+        )
+
+        // 3. Execute ARCore frame.hitTest(x, y)
+        val hits = try {
+            currentFrame.hitTest(xPx, yPx)
+        } catch (e: Exception) {
+            Log.w(TAG, "Exception during frame.hitTest", e)
+            emptyList()
+        }
+
+        val hitTypes = mutableListOf<String>()
+        val hitPoses = mutableListOf<SpatialVector3>()
+        for (i in 0 until hits.size) {
+            val hit = hits[i]
+            val trackable = hit.trackable
+            val pose = hit.hitPose
+            hitPoses.add(SpatialVector3(pose.tx(), pose.ty(), pose.tz()))
+            val typeName = when (trackable) {
+                is Plane -> "Plane(${trackable.type}, ${trackable.trackingState})"
+                is DepthPoint -> "DepthPoint(${trackable.trackingState})"
+                is Point -> "Point(${trackable.trackingState})"
+                else -> trackable?.javaClass?.simpleName ?: "Unknown"
+            }
+            hitTypes.add(typeName)
+        }
+
+        // Candidate 1: Direct Horizontal Plane Polygon Hit
+        for (i in 0 until hits.size) {
+            val hit = hits[i]
+            val trackable = hit.trackable
+            if (trackable is Plane && trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING && trackable.trackingState == TrackingState.TRACKING) {
+                val pose = hit.hitPose
+                if (abs(pose.ty() - floorY) <= 0.22f) {
+                    val point = SpatialVector3(pose.tx(), pose.ty(), pose.tz())
+                    val diag = HitTestDiagnostic(
+                        trackedHorizontalPlanesCount = trackedCount,
+                        selectedFloorPlaneId = floorPlaneId,
+                        floorPlaneTrackingState = floorTrackingState,
+                        floorPolygonVertexCount = floorPolygonVertexCount,
+                        floorElevationY = floorY,
+                        totalHitResultsCount = hits.size,
+                        hitTrackableTypes = hitTypes,
+                        hitPoses = hitPoses,
+                        resolutionMethod = "Direct Floor Plane Polygon Hit",
+                        rejectionReason = null,
+                        finalPoint = point
+                    )
+                    _lastHitTestDiagnostic.value = diag
+                    Log.d(TAG, "hitTestFloor SUCCESS: Method=${diag.resolutionMethod}, Point=$point, FloorY=$floorY")
+                    return point
+                }
+            }
+        }
+
+        // Candidate 2: ARCore Depth Hit on Floor Surface
+        for (i in 0 until hits.size) {
+            val hit = hits[i]
+            val trackable = hit.trackable
+            if (trackable is Point && trackable.trackingState == TrackingState.TRACKING) {
+                val pose = hit.hitPose
+                val elevationDiff = abs(pose.ty() - floorY)
+                if (elevationDiff <= 0.20f) {
+                    val isUpward = if (trackable is DepthPoint) {
+                        pose.yAxis[1] > 0.40f
+                    } else {
+                        true
+                    }
+                    if (isUpward) {
+                        val point = SpatialVector3(pose.tx(), pose.ty(), pose.tz())
+                        val diag = HitTestDiagnostic(
+                            trackedHorizontalPlanesCount = trackedCount,
+                            selectedFloorPlaneId = floorPlaneId,
+                            floorPlaneTrackingState = floorTrackingState,
+                            floorPolygonVertexCount = floorPolygonVertexCount,
+                            floorElevationY = floorY,
+                            totalHitResultsCount = hits.size,
+                            hitTrackableTypes = hitTypes,
+                            hitPoses = hitPoses,
+                            resolutionMethod = "ARCore Depth Sensor Floor Measurement",
+                            rejectionReason = null,
+                            finalPoint = point
+                        )
+                        _lastHitTestDiagnostic.value = diag
+                        Log.d(TAG, "hitTestFloor SUCCESS: Method=${diag.resolutionMethod}, Point=$point, FloorY=$floorY")
+                        return point
                     }
                 }
             }
-            null
-        } catch (e: Exception) {
-            Log.w(TAG, "Hit test floor failed", e)
-            null
+        }
+
+        // Candidate 3: Vertical Wall Plane Hit near Baseboard Junction (within 35cm of floor level)
+        for (i in 0 until hits.size) {
+            val hit = hits[i]
+            val trackable = hit.trackable
+            if (trackable is Plane && trackable.type == Plane.Type.VERTICAL && trackable.trackingState == TrackingState.TRACKING) {
+                val pose = hit.hitPose
+                if (pose.ty() >= floorY - 0.10f && pose.ty() <= floorY + 0.35f) {
+                    // Derive the exact wall-floor junction point on the floor plane
+                    val point = SpatialVector3(pose.tx(), floorY, pose.tz())
+                    val diag = HitTestDiagnostic(
+                        trackedHorizontalPlanesCount = trackedCount,
+                        selectedFloorPlaneId = floorPlaneId,
+                        floorPlaneTrackingState = floorTrackingState,
+                        floorPolygonVertexCount = floorPolygonVertexCount,
+                        floorElevationY = floorY,
+                        totalHitResultsCount = hits.size,
+                        hitTrackableTypes = hitTypes,
+                        hitPoses = hitPoses,
+                        resolutionMethod = "Wall-Floor Baseboard Intersection",
+                        rejectionReason = null,
+                        finalPoint = point
+                    )
+                    _lastHitTestDiagnostic.value = diag
+                    Log.d(TAG, "hitTestFloor SUCCESS: Method=${diag.resolutionMethod}, Point=$point, FloorY=$floorY")
+                    return point
+                }
+            }
+        }
+
+        // Candidate 4: Geometric Ray-Floor Plane Projection (for corners outside current polygon bounds)
+        // Camera ray forward vector in world coordinates:
+        val rayDir = SpatialVector3(
+            -cameraPose.zAxis[0],
+            -cameraPose.zAxis[1],
+            -cameraPose.zAxis[2]
+        ).normalized()
+
+        // Check if ray is blocked by a high vertical wall closer than the floor
+        if (rayDir.y < -0.05f) {
+            val t = (floorY - camPos.y) / rayDir.y
+            
+            val blockingWallHit = hits.firstOrNull { hit ->
+                val trk = hit.trackable
+                trk is Plane && trk.type == Plane.Type.VERTICAL && hit.hitPose.ty() > floorY + 0.35f
+            }
+
+            if (blockingWallHit != null && blockingWallHit.distance < (t - 0.25f)) {
+                val rejection = "Ray hit vertical wall (${String.format("%.2f", blockingWallHit.hitPose.ty())}m) above floor. Aim at floor or baseboard."
+                val diag = HitTestDiagnostic(
+                    trackedHorizontalPlanesCount = trackedCount,
+                    selectedFloorPlaneId = floorPlaneId,
+                    floorPlaneTrackingState = floorTrackingState,
+                    floorPolygonVertexCount = floorPolygonVertexCount,
+                    floorElevationY = floorY,
+                    totalHitResultsCount = hits.size,
+                    hitTrackableTypes = hitTypes,
+                    hitPoses = hitPoses,
+                    rejectionReason = rejection
+                )
+                _lastHitTestDiagnostic.value = diag
+                Log.w(TAG, "hitTestFloor REJECTED: $rejection")
+                return null
+            }
+
+            if (t in 0.3f..8.0f) {
+                val projectedPoint = camPos + (rayDir * t)
+                val distToCenter = SpatialPoint2D(projectedPoint.x, projectedPoint.z)
+                    .distanceTo(SpatialPoint2D(floorCenter.x, floorCenter.z))
+                val maxAllowedRadius = max(4.0f, sqrt(selectedFloorPlane.extentX * selectedFloorPlane.extentX + selectedFloorPlane.extentZ * selectedFloorPlane.extentZ) + 2.5f)
+
+                if (distToCenter <= maxAllowedRadius) {
+                    val diag = HitTestDiagnostic(
+                        trackedHorizontalPlanesCount = trackedCount,
+                        selectedFloorPlaneId = floorPlaneId,
+                        floorPlaneTrackingState = floorTrackingState,
+                        floorPolygonVertexCount = floorPolygonVertexCount,
+                        floorElevationY = floorY,
+                        totalHitResultsCount = hits.size,
+                        hitTrackableTypes = hitTypes,
+                        hitPoses = hitPoses,
+                        resolutionMethod = "Geometric Ray-Floor Projection (dist=${String.format("%.2f", t)}m)",
+                        rejectionReason = null,
+                        finalPoint = projectedPoint
+                    )
+                    _lastHitTestDiagnostic.value = diag
+                    Log.d(TAG, "hitTestFloor SUCCESS: Method=${diag.resolutionMethod}, Point=$projectedPoint, FloorY=$floorY")
+                    return projectedPoint
+                } else {
+                    val rejection = "Aim point (${String.format("%.1f", distToCenter)}m) is outside tracked floor region."
+                    val diag = HitTestDiagnostic(
+                        trackedHorizontalPlanesCount = trackedCount,
+                        selectedFloorPlaneId = floorPlaneId,
+                        floorPlaneTrackingState = floorTrackingState,
+                        floorPolygonVertexCount = floorPolygonVertexCount,
+                        floorElevationY = floorY,
+                        totalHitResultsCount = hits.size,
+                        hitTrackableTypes = hitTypes,
+                        hitPoses = hitPoses,
+                        rejectionReason = rejection
+                    )
+                    _lastHitTestDiagnostic.value = diag
+                    Log.w(TAG, "hitTestFloor REJECTED: $rejection")
+                    return null
+                }
+            } else {
+                val rejection = "Aim ray distance (${String.format("%.1f", t)}m) is out of valid range [0.3m, 8.0m]."
+                val diag = HitTestDiagnostic(
+                    trackedHorizontalPlanesCount = trackedCount,
+                    selectedFloorPlaneId = floorPlaneId,
+                    floorPlaneTrackingState = floorTrackingState,
+                    floorPolygonVertexCount = floorPolygonVertexCount,
+                    floorElevationY = floorY,
+                    totalHitResultsCount = hits.size,
+                    hitTrackableTypes = hitTypes,
+                    hitPoses = hitPoses,
+                    rejectionReason = rejection
+                )
+                _lastHitTestDiagnostic.value = diag
+                Log.w(TAG, "hitTestFloor REJECTED: $rejection")
+                return null
+            }
+        } else {
+            val rejection = "Reticle is pointing horizontally or upward (Y dir: ${String.format("%.2f", rayDir.y)}). Point camera down at floor."
+            val diag = HitTestDiagnostic(
+                trackedHorizontalPlanesCount = trackedCount,
+                selectedFloorPlaneId = floorPlaneId,
+                floorPlaneTrackingState = floorTrackingState,
+                floorPolygonVertexCount = floorPolygonVertexCount,
+                floorElevationY = floorY,
+                totalHitResultsCount = hits.size,
+                hitTrackableTypes = hitTypes,
+                hitPoses = hitPoses,
+                rejectionReason = rejection
+            )
+            _lastHitTestDiagnostic.value = diag
+            Log.w(TAG, "hitTestFloor REJECTED: $rejection")
+            return null
         }
     }
 }

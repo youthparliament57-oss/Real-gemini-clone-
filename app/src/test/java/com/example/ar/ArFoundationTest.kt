@@ -90,4 +90,13 @@ class ArFoundationTest {
         assertTrue(cases.contains("UNSUPPORTED_DEVICE_NOT_CAPABLE"))
         assertTrue(cases.contains("CHECK_ERROR"))
     }
+
+    @Test
+    fun hitTestFloor_withoutActiveFrame_returnsNullAndSetsDiagnostic() {
+        val result = sessionManager.hitTestFloor(500f, 500f)
+        assertNull(result)
+        val diag = sessionManager.lastHitTestDiagnostic.value
+        assertNotNull(diag)
+        assertTrue(diag!!.rejectionReason?.contains("frame") == true)
+    }
 }
