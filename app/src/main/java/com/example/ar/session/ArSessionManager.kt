@@ -2,6 +2,7 @@ package com.example.ar.session
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
 import com.example.ar.capability.ArCapabilityChecker
 import com.example.ar.analysis.model.SpatialVector3
@@ -37,6 +38,7 @@ class ArSessionManager(
     private var session: Session? = null
     private var isDepthSupported: Boolean = false
     private var latestCameraPose: Pose? = null
+    private var latestFrame: Frame? = null
 
     private val _state = MutableStateFlow<ArRuntimeState>(ArRuntimeState.Ready)
     val state: StateFlow<ArRuntimeState> = _state.asStateFlow()
@@ -89,6 +91,10 @@ class ArSessionManager(
             Log.w(TAG, "ARCore APK too old", e)
             _state.value = ArRuntimeState.InstallRequired
             return null
+        } catch (e: PackageManager.NameNotFoundException) {
+            Log.w(TAG, "ARCore package com.google.ar.core not found on device", e)
+            _state.value = ArRuntimeState.InstallRequired
+            return null
         } catch (e: UnavailableSdkTooOldException) {
             Log.e(TAG, "Device SDK too old for ARCore", e)
             _state.value = ArRuntimeState.Unavailable("Android OS update required for AR.")
@@ -101,7 +107,26 @@ class ArSessionManager(
             Log.e(TAG, "Security exception creating AR session", e)
             _state.value = ArRuntimeState.PermissionRequired
             return null
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Check if root cause or exception itself is NameNotFoundException or missing ARCore package
+            var cause: Throwable? = e
+            var isMissingPackage = false
+            while (cause != null) {
+                if (cause is PackageManager.NameNotFoundException ||
+                    cause.message?.contains("com.google.ar.core") == true ||
+                    cause.message?.contains("Could not load application package metadata") == true
+                ) {
+                    isMissingPackage = true
+                    break
+                }
+                cause = cause.cause
+            }
+            if (isMissingPackage) {
+                Log.w(TAG, "ARCore package not installed or metadata inaccessible", e)
+                _state.value = ArRuntimeState.InstallRequired
+                return null
+            }
+
             Log.e(TAG, "Unexpected error creating AR session", e)
             _state.value = ArRuntimeState.Error("Failed to initialize AR session: ${e.message}")
             return null
@@ -199,6 +224,7 @@ class ArSessionManager(
         val currentSession = session ?: return null
         return try {
             val frame = currentSession.update()
+            latestFrame = frame
             val camera = frame.camera
             latestCameraPose = camera.pose
             when (camera.trackingState) {
@@ -254,7 +280,34 @@ class ArSessionManager(
         } finally {
             session = null
             latestCameraPose = null
+            latestFrame = null
             _state.value = ArRuntimeState.Ready
         }
     }
+
+    /**
+     * Performs a hit test on the active session at screen pixel coordinates (xPx, yPx).
+     * Filters for horizontal, upward-facing planes (valid floor surfaces) and returns the 3D position in World Space.
+     */
+    fun hitTestFloor(xPx: Float, yPx: Float): SpatialVector3? {
+        val currentFrame = latestFrame ?: return null
+        return try {
+            val hits = currentFrame.hitTest(xPx, yPx)
+            for (i in 0 until hits.size) {
+                val hit = hits[i]
+                val trackable = hit.trackable
+                if (trackable is Plane) {
+                    if (trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING) {
+                        val pose = hit.hitPose
+                        return SpatialVector3(pose.tx(), pose.ty(), pose.tz())
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Hit test floor failed", e)
+            null
+        }
+    }
 }
+

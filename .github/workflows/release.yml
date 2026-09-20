@@ -1,43 +1,35 @@
-name: Android CI
+name: Build Release APK & Bundle
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build:
-    name: Build & Test Android App
+  release-build:
+    name: Build Release Artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # JDK 21 is required for Android SDK 36, AGP 9.1, and Robolectric 4.16+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      # Official Gradle setup with automatic caching
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Accept Android SDK licenses cleanly without relying on deprecated 'tools' package
       - name: Accept Android SDK Licenses
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: Setup Environment Config (.env)
+      - name: Setup Environment Config
         run: |
           if [ -f .env.example ]; then
             cp .env.example .env
@@ -46,37 +38,34 @@ jobs:
             echo "GEMINI_API_KEY=\"\"" > .env
           fi
 
-      - name: Restore Debug Keystore
+      - name: Restore Signing Keystore
         run: |
           if [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
           fi
           if [ ! -f debug.keystore ]; then
-            echo "Generating fallback debug keystore..."
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
-      - name: Run Unit & Robolectric Tests
-        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Build Release App Bundle (AAB)
+        run: ./gradlew bundleRelease --no-daemon --stacktrace
 
-      - name: Upload Debug APK Artifact
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 14
+          name: app-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
 
-      - name: Upload Test Results (on failure)
+      - name: Upload Release Bundle (AAB)
         uses: actions/upload-artifact@v4
-        if: failure()
         with:
-          name: unit-test-reports
-          path: app/build/reports/tests/testDebugUnitTest/
-          retention-days: 7
+          name: app-release-bundle
+          path: app/build/outputs/bundle/release/*.aab
+          retention-days: 30

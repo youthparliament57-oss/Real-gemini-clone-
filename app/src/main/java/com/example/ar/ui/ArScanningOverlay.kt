@@ -41,6 +41,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import com.example.ar.analysis.model.RoomScanResult
 import com.example.ar.analysis.model.ScanQuality
 import com.example.ar.analysis.model.ScanningState
@@ -56,6 +59,8 @@ fun ArScanningOverlay(
     isDebugVisible: Boolean,
     onToggleDebug: () -> Unit,
     onRescan: () -> Unit,
+    onCalibrate: () -> Unit,
+    onStartManual: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -196,7 +201,37 @@ fun ArScanningOverlay(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (scanResult.isReady) {
+                    Button(
+                        onClick = onCalibrate,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("calibrate_room_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Calibrate Room", fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onStartManual,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("start_manual_calibration_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Manual Calibration Fallback", fontWeight = FontWeight.Medium, color = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Bottom Action Bar: Rescan + Debug Toggle
                 Row(

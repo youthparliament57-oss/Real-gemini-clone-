@@ -38,15 +38,15 @@ class ArCapabilityChecker(private val context: Context) {
      */
     suspend fun checkArAvailability(): ArAvailability = withContext(Dispatchers.IO) {
         try {
-            val availability = ArCoreApk.getInstance().checkAvailability(context)
-            if (availability.isTransient) {
-                // Availability is resolving asynchronously; brief delay to let Google Play Services settle
+            var availability = ArCoreApk.getInstance().checkAvailability(context)
+            var attempts = 0
+            // When transient, wait briefly up to 1 second for ARCore availability to settle
+            while (availability.isTransient && attempts < 5) {
                 kotlinx.coroutines.delay(200)
-                val resolved = ArCoreApk.getInstance().checkAvailability(context)
-                mapAvailability(resolved)
-            } else {
-                mapAvailability(availability)
+                availability = ArCoreApk.getInstance().checkAvailability(context)
+                attempts++
             }
+            mapAvailability(availability)
         } catch (e: Exception) {
             Log.e(TAG, "Error checking ARCore availability", e)
             ArAvailability.CHECK_ERROR

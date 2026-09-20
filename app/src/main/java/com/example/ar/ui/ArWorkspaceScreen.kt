@@ -60,6 +60,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ar.capability.ArAvailability
 import com.example.ar.rendering.ArCameraView
 import com.example.ar.session.ArRuntimeState
+import com.example.ar.calibration.CalibrationState
 
 /**
  * Dedicated minimal AR screen shell for verifying ARCore session lifecycle,
@@ -80,6 +81,8 @@ fun ArWorkspaceScreen(
     val runtimeState by viewModel.runtimeState.collectAsState()
     val scanResult by viewModel.scanResult.collectAsState()
     val isDebugVisible by viewModel.isDebugOverlayVisible.collectAsState()
+    val calibrationState by viewModel.calibrationState.collectAsState()
+    val ceilingHeight by viewModel.ceilingHeight.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -128,7 +131,11 @@ fun ArWorkspaceScreen(
     ) {
         // Camera Viewport layer
         if (viewModel.capabilityChecker.hasCameraPermission() &&
-            availability == ArAvailability.SUPPORTED_INSTALLED
+            availability == ArAvailability.SUPPORTED_INSTALLED &&
+            runtimeState !is ArRuntimeState.InstallRequired &&
+            runtimeState !is ArRuntimeState.Unavailable &&
+            runtimeState !is ArRuntimeState.Error &&
+            runtimeState !is ArRuntimeState.PermissionRequired
         ) {
             ArCameraView(
                 sessionManager = viewModel.sessionManager,
@@ -252,7 +259,7 @@ fun ArWorkspaceScreen(
             }
         }
 
-        // Bottom Scanning and Environment Analysis Overlay
+        // Bottom Scanning and Environment Analysis Overlay / Calibration Overlay
         if (viewModel.capabilityChecker.hasCameraPermission() &&
             availability == ArAvailability.SUPPORTED_INSTALLED &&
             (runtimeState is ArRuntimeState.Tracking || runtimeState is ArRuntimeState.Running || runtimeState is ArRuntimeState.TrackingLost)
@@ -262,24 +269,42 @@ fun ArWorkspaceScreen(
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
             ) {
-                if (isDebugVisible) {
-                    ArDebugOverlay(
+                if (calibrationState is CalibrationState.Scan) {
+                    if (isDebugVisible) {
+                        ArDebugOverlay(
+                            scanResult = scanResult,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                    ArScanningOverlay(
                         scanResult = scanResult,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        isDebugVisible = isDebugVisible,
+                        onToggleDebug = { viewModel.toggleDebugOverlay() },
+                        onRescan = { viewModel.resetScan() },
+                        onCalibrate = { viewModel.attemptAutoCalibration() },
+                        onStartManual = { viewModel.startManualCalibration() }
+                    )
+                } else {
+                    ArCalibrationOverlay(
+                        calibrationState = calibrationState,
+                        ceilingHeight = ceilingHeight,
+                        onStartManual = { viewModel.startManualCalibration() },
+                        onStartAssisted = { viewModel.startAssistedCalibration() },
+                        onAttemptAuto = { viewModel.attemptAutoCalibration() },
+                        onConfirmAuto = { viewModel.confirmAutoCalibration() },
+                        onConfirmAssistedCorner = { viewModel.confirmAssistedCorner(it) },
+                        onCaptureManualCorner = { viewModel.captureManualCorner(it) },
+                        onUpdateCeilingHeight = { viewModel.updateCeilingHeight(it) },
+                        onRetry = { viewModel.retryCalibration() },
+                        sessionManager = viewModel.sessionManager
                     )
                 }
-                ArScanningOverlay(
-                    scanResult = scanResult,
-                    isDebugVisible = isDebugVisible,
-                    onToggleDebug = { viewModel.toggleDebugOverlay() },
-                    onRescan = { viewModel.resetScan() }
-                )
             }
         }
 
         // Informational Guidance Overlay for Non-Running States
         when {
-            !viewModel.capabilityChecker.hasCameraPermission() -> {
+            !viewModel.capabilityChecker.hasCameraPermission() || runtimeState is ArRuntimeState.PermissionRequired -> {
                 PermissionRequiredCard(
                     onRequestPermission = {
                         permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -287,11 +312,12 @@ fun ArWorkspaceScreen(
                     onDismiss = onDismiss
                 )
             }
-            availability == ArAvailability.UNSUPPORTED_DEVICE_NOT_CAPABLE -> {
+            availability == ArAvailability.UNSUPPORTED_DEVICE_NOT_CAPABLE || runtimeState is ArRuntimeState.Unavailable -> {
                 UnsupportedDeviceCard(onDismiss = onDismiss)
             }
             availability == ArAvailability.SUPPORTED_NOT_INSTALLED ||
-            availability == ArAvailability.SUPPORTED_APK_TOO_OLD -> {
+            availability == ArAvailability.SUPPORTED_APK_TOO_OLD ||
+            runtimeState is ArRuntimeState.InstallRequired -> {
                 InstallRequiredCard(
                     onInstall = {
                         if (activity != null) viewModel.requestInstall(activity)

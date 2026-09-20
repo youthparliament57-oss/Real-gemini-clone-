@@ -31,6 +31,13 @@ data class SpatialVector3(
 
     fun dot(other: SpatialVector3): Float = x * other.x + y * other.y + z * other.z
 
+    fun cross(other: SpatialVector3): SpatialVector3 =
+        SpatialVector3(
+            y * other.z - z * other.y,
+            z * other.x - x * other.z,
+            x * other.y - y * other.x
+        )
+
     operator fun plus(other: SpatialVector3): SpatialVector3 =
         SpatialVector3(x + other.x, y + other.y, z + other.z)
 
