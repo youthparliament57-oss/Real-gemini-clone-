@@ -118,9 +118,9 @@ class ArWorkspaceViewModel(application: Application) : AndroidViewModel(applicat
         val result = calibrationManager.attemptAutoCalibration(_scanResult.value, _ceilingHeight.value)
         if (result != null) {
             cachedAutoResult = result
-            _calibrationState.value = CalibrationState.AutoCalibrated
+            _calibrationState.value = CalibrationState.AutoCalibrated(result)
         } else {
-            // If automatic calibration is insufficient, transition to assisted calibration
+            // If automatic calibration is insufficient, automatically transition to assisted calibration
             startAssistedCalibration()
         }
     }
@@ -161,13 +161,15 @@ class ArWorkspaceViewModel(application: Application) : AndroidViewModel(applicat
                     rawCorners = confirmed,
                     ceilingHeight = _ceilingHeight.value,
                     method = CalibrationMethod.ASSISTED,
-                    confidence = 0.8f
+                    confidence = 0.85f
                 )
                 if (result != null) {
                     _calibrationState.value = CalibrationState.Calibrated(result)
                 } else {
                     val (_, errorMsg) = calibrationManager.validateCalibration(confirmed, _ceilingHeight.value)
-                    _calibrationState.value = CalibrationState.CalibrationFailed(errorMsg ?: "Assisted calibration validation failed.")
+                    _calibrationState.value = CalibrationState.CalibrationFailed(
+                        errorMsg ?: "Assisted calibration validation failed. Please try manual four-corner calibration."
+                    )
                 }
             } else {
                 _calibrationState.value = state.copy(confirmedCorners = confirmed)
@@ -180,22 +182,37 @@ class ArWorkspaceViewModel(application: Application) : AndroidViewModel(applicat
      */
     fun startManualCalibration() {
         _calibrationState.value = CalibrationState.ManualCalibration(
-            cornerIndex = 0,
-            collectedCorners = emptyList()
+            stage = com.example.ar.calibration.ManualCornerStage.CORNER_1,
+            collectedCorners = emptyList(),
+            cornerIndex = 0
         )
     }
 
     /**
      * Captures a physical floor point for the current manual corner index.
-     * Validates and completes when the fourth corner is added.
+     * Validates and completes through CORNER_1 -> CORNER_2 -> CORNER_3 -> CORNER_4 -> VALIDATING -> CALIBRATED.
      */
     fun captureManualCorner(position: SpatialVector3) {
         val state = _calibrationState.value
         if (state is CalibrationState.ManualCalibration) {
+            // Check minimum distance from previously collected corners
+            for (prev in state.collectedCorners) {
+                if (position.distanceTo(prev) < CalibrationManager.MIN_CORNER_DISTANCE_METERS) {
+                    // Too close to a previously recorded corner
+                    return
+                }
+            }
+
             val updatedCorners = state.collectedCorners + position
-            val nextIndex = state.cornerIndex + 1
-            if (nextIndex >= 4) {
-                // Completed!
+            val nextStage = state.stage.next()
+
+            if (nextStage == com.example.ar.calibration.ManualCornerStage.VALIDATING || updatedCorners.size == 4) {
+                _calibrationState.value = CalibrationState.ManualCalibration(
+                    stage = com.example.ar.calibration.ManualCornerStage.VALIDATING,
+                    collectedCorners = updatedCorners,
+                    cornerIndex = 4
+                )
+                // Validate full geometry
                 val result = calibrationManager.buildCalibrationResult(
                     rawCorners = updatedCorners,
                     ceilingHeight = _ceilingHeight.value,
@@ -206,15 +223,42 @@ class ArWorkspaceViewModel(application: Application) : AndroidViewModel(applicat
                     _calibrationState.value = CalibrationState.Calibrated(result)
                 } else {
                     val (_, errorMsg) = calibrationManager.validateCalibration(updatedCorners, _ceilingHeight.value)
-                    _calibrationState.value = CalibrationState.CalibrationFailed(errorMsg ?: "Manual calibration validation failed.")
+                    _calibrationState.value = CalibrationState.CalibrationFailed(
+                        errorMsg ?: "Manual calibration geometry validation failed."
+                    )
                 }
             } else {
                 _calibrationState.value = CalibrationState.ManualCalibration(
-                    cornerIndex = nextIndex,
-                    collectedCorners = updatedCorners
+                    stage = nextStage,
+                    collectedCorners = updatedCorners,
+                    cornerIndex = updatedCorners.size
                 )
             }
         }
+    }
+
+    /**
+     * Retries/undoes the last captured corner during manual four-corner calibration.
+     */
+    fun retryCurrentManualCorner() {
+        val state = _calibrationState.value
+        if (state is CalibrationState.ManualCalibration && state.collectedCorners.isNotEmpty()) {
+            val poppedCorners = state.collectedCorners.dropLast(1)
+            val prevStage = state.stage.previous()
+            _calibrationState.value = CalibrationState.ManualCalibration(
+                stage = prevStage,
+                collectedCorners = poppedCorners,
+                cornerIndex = poppedCorners.size
+            )
+        }
+    }
+
+    /**
+     * Cancels the active calibration process and returns safely to Scan state.
+     */
+    fun cancelCalibration() {
+        _calibrationState.value = CalibrationState.Scan
+        cachedAutoResult = null
     }
 
     /**

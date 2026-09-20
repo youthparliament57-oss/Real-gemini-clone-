@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.SquareFoot
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,6 +31,9 @@ import androidx.compose.ui.unit.sp
 import com.example.ar.analysis.model.SpatialVector3
 import com.example.ar.calibration.CalibrationMethod
 import com.example.ar.calibration.CalibrationState
+import com.example.ar.calibration.ManualCornerStage
+import com.example.ar.calibration.model.CalibrationConfidence
+import com.example.ar.session.ArSessionManager
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,14 +47,16 @@ fun ArCalibrationOverlay(
     onConfirmAuto: () -> Unit,
     onConfirmAssistedCorner: (SpatialVector3) -> Unit,
     onCaptureManualCorner: (SpatialVector3) -> Unit,
+    onRetryCurrentCorner: () -> Unit = {},
+    onCancelCalibration: () -> Unit = {},
     onUpdateCeilingHeight: (Float) -> Boolean,
     onRetry: () -> Unit,
-    sessionManager: com.example.ar.session.ArSessionManager,
+    sessionManager: ArSessionManager,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
     var hitTestError by remember { mutableStateOf<String?>(null) }
+    val lastDiag by sessionManager.lastHitTestDiagnostic.collectAsState()
 
     // Clear temporary error upon state change
     LaunchedEffect(calibrationState) {
@@ -61,8 +67,8 @@ fun ArCalibrationOverlay(
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
 
-        // 1. Center Precision Reticle for Manual Calibration Mode
-        if (calibrationState is CalibrationState.ManualCalibration) {
+        // 1. Center Precision Reticle for Manual & Assisted Calibration Modes
+        if (calibrationState is CalibrationState.ManualCalibration || calibrationState is CalibrationState.AssistedCalibration) {
             Box(
                 modifier = Modifier
                     .size(64.dp)
@@ -73,9 +79,9 @@ fun ArCalibrationOverlay(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .border(2.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+                        .border(2.dp, Color.White.copy(alpha = 0.85f), CircleShape)
                 )
-                // Inner dot
+                // Inner center point
                 Box(
                     modifier = Modifier
                         .size(8.dp)
@@ -114,7 +120,75 @@ fun ArCalibrationOverlay(
             }
         }
 
-        // 2. Active overlay state content based on calibration state machine
+        // 2. Corner progress visual HUD on top during manual mode
+        if (calibrationState is CalibrationState.ManualCalibration && calibrationState.collectedCorners.isNotEmpty()) {
+            Surface(
+                color = Color(0xD90F172A),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    for (i in 0 until 4) {
+                        val isCaptured = i < calibrationState.collectedCorners.size
+                        val isActive = i == calibrationState.collectedCorners.size
+                        val cornerTag = when (i) {
+                            0 -> "C1 (Origin)"
+                            1 -> "C2 (+X)"
+                            2 -> "C3"
+                            3 -> "C4"
+                            else -> "C"
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(
+                                        when {
+                                            isCaptured -> Color(0xFF10B981)
+                                            isActive -> Color(0xFF38BDF8)
+                                            else -> Color(0xFF334155)
+                                        },
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isCaptured) {
+                                    Icon(
+                                        Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "${i + 1}",
+                                        color = if (isActive) Color.Black else Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Text(
+                                text = cornerTag,
+                                color = if (isActive) Color(0xFF38BDF8) else Color(0xFF94A3B8),
+                                fontSize = 10.sp,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Active overlay state content based on calibration state machine
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -123,7 +197,7 @@ fun ArCalibrationOverlay(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Temporary error toast for failed hits
+            // Temporary error toast for failed hits or invalid geometry
             AnimatedVisibility(
                 visible = hitTestError != null,
                 enter = fadeIn(),
@@ -157,29 +231,44 @@ fun ArCalibrationOverlay(
 
             when (calibrationState) {
                 is CalibrationState.Scan -> {
-                    // Handled externally or embedded as starting calibration triggers
-                    // Let's show a prompt to initiate auto-calibration when scanning is ready
+                    // Handled by ArScanningOverlay
                 }
 
                 is CalibrationState.AutoCalibration -> {
                     CalibrationCard(
-                        title = "Automatic Calibration",
-                        icon = Icons.Default.Sensors,
-                        description = "Analyzing detected floor planes and wall geometry intersections to configure coordinates..."
+                        title = "Automatic Room Synthesis",
+                        icon = Icons.Default.Autorenew,
+                        description = "Aggregating tracked floor planes and room boundaries..."
                     ) {
-                        CircularProgressIndicator(
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
                             color = Color(0xFF38BDF8),
-                            modifier = Modifier.size(36.dp)
+                            trackColor = Color(0x33FFFFFF)
                         )
                     }
                 }
 
                 is CalibrationState.AutoCalibrated -> {
+                    val result = calibrationState.result
                     CalibrationCard(
-                        title = "Calibration Complete",
+                        title = "Automatic Calibration Ready",
                         icon = Icons.Default.CheckCircle,
-                        description = "Room geometry successfully calculated from scanned plane data."
+                        description = "High-confidence room geometry synthesized automatically from active plane scans."
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            MetricBlock("Width", "${String.format("%.2f", result.roomWidth)} m")
+                            MetricBlock("Depth", "${String.format("%.2f", result.roomDepth)} m")
+                            MetricBlock("Confidence", "${(result.confidence * 100).roundToInt()}%")
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -189,9 +278,9 @@ fun ArCalibrationOverlay(
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .testTag("re_calibrate_manual_btn")
+                                    .testTag("auto_fallback_to_manual_btn")
                             ) {
-                                Text("Manual Fine-Tune", fontSize = 12.sp)
+                                Text("Use Manual", fontSize = 12.sp)
                             }
                             Button(
                                 onClick = onConfirmAuto,
@@ -211,7 +300,7 @@ fun ArCalibrationOverlay(
                     CalibrationCard(
                         title = "Assisted Calibration",
                         icon = Icons.Default.CheckCircle,
-                        description = "Reviewing auto-detected room features. Please select and confirm each room corner."
+                        description = "Reviewing auto-detected room features. Select candidate corners or point reticle on floor."
                     ) {
                         Text(
                             text = "Confirmed Corners: ${calibrationState.confirmedCorners.size}/4 ($remaining remaining)",
@@ -221,7 +310,6 @@ fun ArCalibrationOverlay(
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
 
-                        // If candidate corners are available, allow user to tap-confirm them
                         if (calibrationState.candidateCorners.isNotEmpty()) {
                             val nextCandidate = calibrationState.candidateCorners.getOrNull(calibrationState.confirmedCorners.size)
                             if (nextCandidate != null) {
@@ -231,21 +319,13 @@ fun ArCalibrationOverlay(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag("confirm_candidate_corner_btn")
-                                ) {
-                                    Text("Confirm Highlighted Corner")
+                                    ) {
+                                    Text("Confirm Highlighted Candidate", color = Color.Black, fontWeight = FontWeight.Bold)
                                 }
                             }
-                        } else {
-                            Text(
-                                text = "No candidate corners detected. Please use manual fallback below.",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 12.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         OutlinedButton(
                             onClick = onStartManual,
@@ -254,25 +334,20 @@ fun ArCalibrationOverlay(
                                 .fillMaxWidth()
                                 .testTag("assisted_fallback_to_manual_btn")
                         ) {
-                            Text("Manual 4-Corner Fallback")
+                            Text("Switch to Manual 4-Corner Mode")
                         }
                     }
                 }
 
                 is CalibrationState.ManualCalibration -> {
+                    val stage = calibrationState.stage
                     val index = calibrationState.cornerIndex
-                    val stepText = when (index) {
-                        0 -> "Corner 1 (Origin)"
-                        1 -> "Corner 2 (X-Axis direction)"
-                        2 -> "Corner 3"
-                        3 -> "Corner 4"
-                        else -> "Corner"
-                    }
+                    val stepNumber = stage.cornerNumber
 
                     CalibrationCard(
                         title = "Manual 4-Corner Calibration",
                         icon = Icons.Default.Camera,
-                        description = "Walk and point the reticle directly at the physical floor corner ($stepText) then capture."
+                        description = stage.instruction
                     ) {
                         // Steps indicator
                         Row(
@@ -293,6 +368,7 @@ fun ArCalibrationOverlay(
                             }
                         }
 
+                        // Capture Corner Button
                         Button(
                             onClick = {
                                 val point = sessionManager.hitTestFloor(widthPx / 2f, heightPx / 2f)
@@ -300,7 +376,7 @@ fun ArCalibrationOverlay(
                                     onCaptureManualCorner(point)
                                     hitTestError = null
                                 } else {
-                                    val diag = sessionManager.lastHitTestDiagnostic.value
+                                    val diag = lastDiag
                                     hitTestError = "Aim failure: ${diag?.rejectionReason ?: "Center reticle directly on a tracked floor surface."}"
                                 }
                             },
@@ -312,29 +388,78 @@ fun ArCalibrationOverlay(
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Capture $stepText", fontWeight = FontWeight.Bold, color = Color.Black)
+                            Text("Capture ${stage.stepTitle}", fontWeight = FontWeight.Bold, color = Color.Black)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        OutlinedButton(
-                            onClick = onRetry,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (calibrationState.collectedCorners.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = onRetryCurrentCorner,
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("undo_corner_btn")
+                                ) {
+                                    Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Undo Last", fontSize = 12.sp)
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = onCancelCalibration,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("cancel_manual_btn")
+                            ) {
+                                Text("Cancel", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                is CalibrationState.CeilingHeightEntry -> {
+                    val result = calibrationState.provisionalResult
+                    CalibrationCard(
+                        title = "Enter Ceiling Height",
+                        icon = Icons.Outlined.SquareFoot,
+                        description = "Floor footprint confirmed! Please confirm the physical ceiling height in meters."
+                    ) {
+                        CeilingHeightController(
+                            currentHeightMeters = ceilingHeight,
+                            onUpdateHeight = onUpdateCeilingHeight
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Button(
+                            onClick = {
+                                onUpdateCeilingHeight(ceilingHeight)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("cancel_manual_btn")
+                                .height(48.dp)
+                                .testTag("confirm_ceiling_height_btn")
                         ) {
-                            Text("Cancel Manual Fallback")
+                            Text("Confirm & Lock Room", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
 
                 is CalibrationState.Calibrated -> {
                     val result = calibrationState.result
+                    val confidence = result.confidenceRating
                     CalibrationCard(
-                        title = "Room Coordinate Frame",
+                        title = "Room Frame Active (${confidence.label})",
                         icon = Icons.Default.Sensors,
-                        description = "System fully calibrated! Room Space origin locked at Corner 1. Physical walls synthesized."
+                        description = "Room Space locked at Corner 1 (Origin). Physical wall coordinate frames synthesized."
                     ) {
                         // Display room metrics
                         Row(
@@ -346,12 +471,12 @@ fun ArCalibrationOverlay(
                                 value = "${String.format("%.2f", result.roomWidth)} x ${String.format("%.2f", result.roomDepth)} m"
                             )
                             MetricBlock(
-                                title = "Est. Floor Area",
-                                value = "${String.format("%.1f", result.roomWidth * result.roomDepth)} m²"
+                                title = "Floor Area",
+                                value = "${String.format("%.1f", result.floorAreaSqMeters)} m²"
                             )
                             MetricBlock(
-                                title = "Walls Built",
-                                value = "${result.wallDefinitions.size}"
+                                title = "Walls Synthesized",
+                                value = "${result.walls.size}"
                             )
                         }
 
@@ -517,7 +642,6 @@ private fun CeilingHeightController(
     onUpdateHeight: (Float) -> Boolean
 ) {
     var textValue by remember(currentHeightMeters) {
-        // Round to 2 decimals for presentation
         mutableStateOf(String.format("%.2f", currentHeightMeters))
     }
     var validationError by remember { mutableStateOf(false) }
@@ -526,6 +650,7 @@ private fun CeilingHeightController(
     val totalInches = (currentHeightMeters * 39.3701f).roundToInt()
     val feet = totalInches / 12
     val inches = totalInches % 12
+    val cm = (currentHeightMeters * 100f).roundToInt()
 
     Column(
         modifier = Modifier
@@ -554,9 +679,9 @@ private fun CeilingHeightController(
                 )
             }
 
-            // Feet-inches friendly presentation label
+            // Feet-inches and cm friendly presentation label
             Text(
-                text = "${feet}ft ${inches}in",
+                text = "${feet}ft ${inches}in (${cm}cm)",
                 color = Color(0xFF38BDF8),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold
@@ -570,10 +695,10 @@ private fun CeilingHeightController(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Decrement Button
+            // Decrement Button (-0.1m)
             IconButton(
                 onClick = {
-                    val newVal = (currentHeightMeters - 0.1f).coerceIn(1.5f, 10.0f)
+                    val newVal = (currentHeightMeters - 0.1f).coerceIn(1.5f, 12.0f)
                     onUpdateHeight(newVal)
                 },
                 modifier = Modifier
@@ -613,10 +738,10 @@ private fun CeilingHeightController(
                 suffix = { Text("m", color = Color.White.copy(alpha = 0.6f)) }
             )
 
-            // Increment Button
+            // Increment Button (+0.1m)
             IconButton(
                 onClick = {
-                    val newVal = (currentHeightMeters + 0.1f).coerceIn(1.5f, 10.0f)
+                    val newVal = (currentHeightMeters + 0.1f).coerceIn(1.5f, 12.0f)
                     onUpdateHeight(newVal)
                 },
                 modifier = Modifier
@@ -630,7 +755,7 @@ private fun CeilingHeightController(
 
         if (validationError) {
             Text(
-                text = "Height must be between 1.5m (~5ft) and 10.0m (~33ft).",
+                text = "Height must be between 1.5m (~5ft) and 12.0m (~39ft).",
                 color = Color.Red,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp)

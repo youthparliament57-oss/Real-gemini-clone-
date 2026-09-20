@@ -294,6 +294,8 @@ fun ArWorkspaceScreen(
                         onConfirmAuto = { viewModel.confirmAutoCalibration() },
                         onConfirmAssistedCorner = { viewModel.confirmAssistedCorner(it) },
                         onCaptureManualCorner = { viewModel.captureManualCorner(it) },
+                        onRetryCurrentCorner = { viewModel.retryCurrentManualCorner() },
+                        onCancelCalibration = { viewModel.cancelCalibration() },
                         onUpdateCeilingHeight = { viewModel.updateCeilingHeight(it) },
                         onRetry = { viewModel.retryCalibration() },
                         sessionManager = viewModel.sessionManager
