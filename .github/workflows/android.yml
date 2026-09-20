@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # JDK 21 is required for Android SDK 36, AGP 9.1, and Robolectric 4.16+
       - name: Set up JDK 21
